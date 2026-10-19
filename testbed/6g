@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 6G testbed launcher (runs on the host PC).
 #   6g create     build the isolated VM (first time only)
+#   6g setup      install the whole testbed inside the VM (first time only)
 #   6g start      boot the VM and open the dashboard tunnel
 #   6g stop       shut the VM down (frees all CPU and RAM)
 #   6g status     show VM state and resource use
@@ -96,6 +97,7 @@ cmd_create() {
   command -v virt-install >/dev/null || die "Run first: sudo bash $ROOT/host/00-install-host.sh"
   [[ -w $IMG_DIR ]] || die "$IMG_DIR missing; run the host install script"
 
+  mkdir -p "$ROOT/keys"
   if [[ ! -f $KEY ]]; then
     say "Creating SSH key for the VM"
     ssh-keygen -q -t ed25519 -N '' -C sixg-testbed -f "$KEY"
@@ -136,7 +138,38 @@ cmd_create() {
   virsh shutdown "$VM" >/dev/null
   for _ in $(seq 1 60); do [[ $(vm_state) == "shut off" ]] && break; sleep 2; done
   virsh start "$VM" >/dev/null; wait_ssh
-  say "VM ready. Next: 6g start"
+  say "VM ready. Next: 6g setup"
+}
+
+cmd_setup() {
+  case $(vm_state) in
+    "not created") die "Run: 6g create" ;;
+    running) ;;
+    *) net_up; virsh start "$VM" >/dev/null ;;
+  esac
+  wait_ssh
+  say "Copying the testbed files into the VM"
+  tar -C "$ROOT" -cz --exclude=node_modules --exclude=dist --exclude=__pycache__ \
+      --exclude='*.tsbuildinfo' vm k8s images dashboard \
+    | ssh "${SSH_OPTS[@]}" "sixg@$VM_IP" 'tar -xz -C ~'
+
+  # The install runs inside the VM on its own, so a closed terminal or lost SSH does not stop it.
+  # Running "6g setup" again while it runs just shows the log again.
+  if ! ssh "${SSH_OPTS[@]}" "sixg@$VM_IP" '[ -f ~/setup.pid ] && kill -0 $(cat ~/setup.pid) 2>/dev/null'; then
+    say "Starting the install inside the VM (about 1 to 2 hours the first time)"
+    ssh "${SSH_OPTS[@]}" "sixg@$VM_IP" \
+      'rm -f ~/setup.status; setsid bash -c "bash ~/vm/setup.sh; echo \$? > ~/setup.status" \
+         > ~/setup.log 2>&1 < /dev/null & echo $! > ~/setup.pid'
+  fi
+  say "Showing progress. Ctrl+C only closes this view, the install keeps going."
+  ssh "${SSH_OPTS[@]}" -o ServerAliveInterval=30 "sixg@$VM_IP" \
+    'tail -n +1 -f ~/setup.log --pid=$(cat ~/setup.pid)' || true
+  local rc; rc=$(ssh "${SSH_OPTS[@]}" "sixg@$VM_IP" 'cat ~/setup.status 2>/dev/null') || rc=""
+  case $rc in
+    0)  say "Setup finished. Next: 6g start" ;;
+    "") die "Lost the progress view. Run 6g setup again to see it." ;;
+    *)  die "Setup failed (see the log above, full log in the VM: ~/setup.log). Fix the cause, then run 6g setup again." ;;
+  esac
 }
 
 cmd_start() {
@@ -209,6 +242,6 @@ cmd_destroy() {
 }
 
 case ${1:-} in
-  create|start|stop|status|ssh|snapshot|reset|destroy) c=$1; shift; "cmd_$c" "$@" ;;
-  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' ;;
+  create|setup|start|stop|status|ssh|snapshot|reset|destroy) c=$1; shift; "cmd_$c" "$@" ;;
+  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' ;;
 esac

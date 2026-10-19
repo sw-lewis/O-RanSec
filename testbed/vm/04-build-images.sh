@@ -7,7 +7,8 @@ if ! command -v docker >/dev/null; then
 fi
 build() {  # name dir
   echo "[build] $1"
-  sudo docker build -t "$1" ~/images/"$2" > ~/build-"$2".log 2>&1 || { tail -40 ~/build-"$2".log; return 1; }
+  local src=~/images/"$2"; [[ $2 == dashboard ]] && src=~/dashboard
+  sudo docker build -t "$1" "$src" > ~/build-"$2".log 2>&1 || { tail -40 ~/build-"$2".log; return 1; }
   sudo docker save "$1" | sudo k3s ctr -n k8s.io images import - >/dev/null
   echo "[build] $1 loaded into k3s"
 }

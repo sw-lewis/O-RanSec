@@ -118,10 +118,12 @@ Project6G/
     │   ├── relay.py             forwards real devices to the VM
     │   └── launch.sh            for desktop icons (start/stop without a terminal)
     ├── vm/                 runs inside the VM
+    │   ├── setup.sh             runs all the steps below in order (used by "6g setup")
     │   ├── 01-k3s.sh            install Kubernetes (k3s) + Helm
     │   ├── 02-core-ran.sh       deploy 5G core + simulated radio
     │   ├── 03-observability.sh  deploy Prometheus, Grafana, Loki, Alloy
-    │   └── 04-build-images.sh   build the testbed's own container images
+    │   ├── 04-build-images.sh   build the testbed's own container images
+    │   └── 05-apps.sh           deploy O-RAN, edge device hub, traffic meter, dashboard
     ├── k8s/                Kubernetes settings for every part
     │   ├── core/   ran/   oran/   edge/   obs/   control/
     ├── images/             Dockerfiles for our own images
@@ -138,26 +140,52 @@ The folder `testbed/keys/` is created automatically. It holds the SSH key for th
 
 ## 5. First-time setup
 
-Do this once. It takes about **1 to 2 hours**, mostly waiting for downloads and image builds.
+You do this **only once**. In total it takes about **1.5 to 2 hours**. Most of that time is waiting while the computer downloads and builds software. You do not need to watch it.
 
-In all steps below, start from the project folder:
+There are only **5 commands**:
+
+```bash
+sudo bash host/00-install-host.sh   # Step 2: prepare your PC
+./6g create                         # Step 3: create the VM
+./6g setup                          # Step 4: install the testbed inside the VM
+./6g start                          # Step 5: start it
+./6g snapshot clean                 # Step 6: save a clean copy
+```
+
+Below, each step is explained in detail.
+
+### Step 1. Get the code
+
+Open a terminal and run:
 
 ```bash
 git clone https://github.com/Shariar13/Project6G.git
 cd Project6G/testbed
 ```
 
-### Step 1. Prepare your PC (about 5 minutes)
+**Important:** all the commands in this guide are run from this `testbed` folder, unless the guide says otherwise.
 
-This installs KVM and libvirt, creates the private VM network and the isolation firewall.
+### Step 2. Prepare your PC (about 5 minutes)
 
 ```bash
 sudo bash host/00-install-host.sh
 ```
 
+This will ask for your password. It does these things:
+
+1. Installs KVM and libvirt (the software that runs virtual machines)
+2. Adds your user to the `libvirt` and `kvm` groups
+3. Makes a folder for the VM disk: `/var/lib/libvirt/images/sixg`
+4. Creates the firewall that keeps the VM isolated
+5. Creates the private VM network `sixg-net`
+
+You should see `Done. Next: ./testbed/6g create` at the end.
+
+**Tip:** after this step, it is best to **log out and log in again** (or restart your PC), so your user is really in the new groups. The `6g` command tries to handle this by itself, but logging out once makes it sure.
+
 Nothing from this step starts by itself when your PC boots.
 
-### Step 2. Create the VM (about 10 to 15 minutes)
+### Step 3. Create the VM (about 10 to 15 minutes)
 
 ```bash
 ./6g create
@@ -165,120 +193,140 @@ Nothing from this step starts by itself when your PC boots.
 
 This will:
 
-1. Create an SSH key in `testbed/keys/`
-2. Download the Ubuntu 22.04 cloud image
-3. Create the VM (10 CPU, 20 GB RAM, no display, no shared folders)
+1. Create a private SSH key in `testbed/keys/` (used to log in to the VM)
+2. Download the Ubuntu 22.04 cloud image (about 700 MB)
+3. Create the VM: 10 CPU cores, 20 GB RAM, no display, no shared folders
 4. **Check that the isolation firewall is attached.** If it is not, it stops right away for safety
-5. Install updates inside the VM and restart it once
+5. Install all Ubuntu updates inside the VM and restart it once
 
-When you see `VM ready. Next: 6g start`, go on.
+When it is done you will see:
 
-### Step 3. Copy the testbed files into the VM
-
-```bash
-SSHOPT="-i keys/sixg_ed25519 -o UserKnownHostsFile=keys/known_hosts"
-scp $=SSHOPT -r vm k8s images sixg@10.166.0.10:~/
-scp $=SSHOPT -r dashboard sixg@10.166.0.10:~/images/
+```
+[6g] VM ready. Next: 6g setup
 ```
 
-> If you use **bash** (not zsh), write `$SSHOPT` instead of `$=SSHOPT`.
-
-### Step 4. Log in to the VM
+### Step 4. Install the testbed inside the VM (about 1 to 2 hours)
 
 ```bash
-./6g ssh
+./6g setup
 ```
 
-You are now **inside** the VM. Steps 5 to 9 all run here.
+This one command does everything inside the VM. It shows you the progress live. The 5 parts are:
 
-### Step 5. Install Kubernetes (about 3 minutes)
+| Part | What it installs | Time |
+|---|---|---|
+| 1/5 | Kubernetes (k3s) and Helm | about 2 min |
+| 2/5 | Builds the testbed's own container images (srsRAN, FlexRIC, dashboard, device tools ...) | **45 to 90 min** |
+| 3/5 | The 5G core (Open5GS, 3 slices) and the simulated radio (UERANSIM) | about 5 min |
+| 4/5 | Monitoring (Prometheus, Grafana, Loki, Alloy) | about 5 min |
+| 5/5 | O-RAN (srsRAN + FlexRIC), edge device hub, traffic meter, dashboard | about 5 min |
 
-```bash
-bash ~/vm/01-k3s.sh
-source ~/.bashrc
+Part 2/5 is slow because srsRAN and FlexRIC are compiled from source code. During this time the screen may not change for 20 minutes or more. This is normal. Do not stop it.
+
+**Good to know:**
+
+- The install runs **inside the VM on its own**. If you close the terminal, press `Ctrl+C`, or your SSH connection drops, the install **keeps going**.
+- To watch the progress again, simply run `./6g setup` again. If the install is still running, it just shows the log again. It does not start a second install.
+- The full log is kept inside the VM in `~/setup.log`.
+
+When everything is done you will see:
+
+```
+===== [..:..:..] Setup finished =====
+[6g] Setup finished. Next: 6g start
 ```
 
-At the end you should see one node with status `Ready`.
+**If it fails:** you will see `Setup failed` and the error just above it. Most of the time the cause is a slow or broken internet connection during a download. Just run `./6g setup` again. Parts that are already finished go quickly the second time. If it still fails, see [Troubleshooting](#11-troubleshooting) and send the error message to the project owner.
 
-### Step 6. Build the container images (about 45 to 90 minutes)
-
-srsRAN and FlexRIC are built from source, so this is the slowest step. The order matters: `srsran-zmq` needs `srsran-gnb` and `srsue` first.
-
-```bash
-bash ~/vm/04-build-images.sh srsran-gnb srsue srsran-zmq flexric \
-     flowmon device-hub device-gateway ardupilot-sitl dashboard
-```
-
-Each image prints `loaded into k3s` when done. If one fails, the last 40 lines of its build log are shown. Full logs are in `~/build-<name>.log`.
-
-### Step 7. Deploy the 5G core and the simulated radio (about 5 minutes)
-
-```bash
-bash ~/vm/02-core-ran.sh
-```
-
-### Step 8. Deploy monitoring (about 5 minutes)
-
-```bash
-bash ~/vm/03-observability.sh
-```
-
-### Step 9. Deploy the O-RAN part, the edge, traffic meter and dashboard
-
-```bash
-kubectl create namespace sixg-ric
-helm upgrade --install oran ~/k8s/oran -n sixg-ran
-kubectl apply -f ~/k8s/obs/flowmon.yaml
-kubectl apply -f ~/k8s/edge/device-hub.yaml
-kubectl apply -f ~/k8s/control/dashboard.yaml
-```
-
-Check that everything is running (all pods should show `Running`):
-
-```bash
-kubectl get pods -A
-```
-
-It is normal that some pods restart a few times in the first minutes while other parts are still starting.
-
-Now leave the VM:
-
-```bash
-exit
-```
-
-### Step 10. Start and open the dashboard
-
-Back on your PC:
+### Step 5. Start the testbed and open the dashboard
 
 ```bash
 ./6g start
 ```
 
-Open **http://127.0.0.1:8660** in your browser. 🎉
+When you see the line with `Running. Dashboard: http://127.0.0.1:8660`, open this address in your browser:
 
-### Step 11. Save a clean snapshot (strongly recommended)
+**http://127.0.0.1:8660**
 
-When everything shows healthy in the dashboard, save this good state:
+Right after the first start, give it about **3 to 5 minutes**. Some parts restart a few times while the others are still starting. This is normal. When the badge at the top right of the dashboard shows all parts healthy (for example `27/27 healthy`), the testbed is ready. 🎉
+
+### Step 6. Save a clean snapshot (strongly recommended)
+
+When everything is healthy, save this good state:
 
 ```bash
 ./6g snapshot clean
 ```
 
-Now you can always go back to it with `./6g reset` (see [section 9](#9-snapshots-and-reset)).
+Now you can always go back to this exact state with `./6g reset` (see [section 9](#9-snapshots-and-reset)). This is very useful after a security test that broke things.
+
+### Step 7. Stop it when you are done
+
+```bash
+./6g stop
+```
+
+The VM shuts down and uses no CPU and no RAM. Next time you only need `./6g start`. You never need to run steps 2 to 4 again.
 
 ### Optional: desktop icons
 
-To start and stop the testbed by clicking an icon (no terminal), make two `.desktop` files in `~/.local/share/applications/` that run:
+To start and stop the testbed by clicking an icon (no terminal), create two files.
 
-```
-/full/path/to/Project6G/testbed/host/launch.sh start
-/full/path/to/Project6G/testbed/host/launch.sh stop
+File `~/.local/share/applications/sixg-testbed-start.desktop`:
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=6G Testbed: Start
+Exec=/full/path/to/Project6G/testbed/host/launch.sh start
+Icon=network-wireless
+Terminal=false
 ```
 
-The start icon also opens the dashboard in your browser when it is ready.
+File `~/.local/share/applications/sixg-testbed-stop.desktop`:
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=6G Testbed: Stop
+Exec=/full/path/to/Project6G/testbed/host/launch.sh stop
+Icon=system-shutdown
+Terminal=false
+```
+
+Change `/full/path/to/` to where you cloned the project. The start icon also opens the dashboard in your browser when it is ready. Messages appear as desktop notifications, and the log is in `/tmp/sixg-launch.log`.
+
+### Advanced: install step by step by hand
+
+You normally do **not** need this. `./6g setup` does all of it. Use it only if you want to understand the install, or to repeat one single part.
+
+First copy the files into the VM (from the `testbed` folder on your PC):
+
+```bash
+tar -cz --exclude=node_modules --exclude=dist --exclude=__pycache__ vm k8s images dashboard \
+  | ./6g ssh 'tar -xz -C ~'
+```
+
+Then log in to the VM with `./6g ssh` and run the parts in this order:
+
+```bash
+bash ~/vm/01-k3s.sh                 # 1/5 Kubernetes and Helm
+bash ~/vm/04-build-images.sh srsran-gnb srsue srsran-zmq flexric \
+     flowmon device-hub device-gateway ardupilot-sitl dashboard   # 2/5 images
+bash ~/vm/02-core-ran.sh            # 3/5 5G core and simulated radio
+bash ~/vm/03-observability.sh       # 4/5 monitoring
+bash ~/vm/05-apps.sh                # 5/5 O-RAN, edge, traffic meter, dashboard
+exit
+```
+
+Notes:
+
+- Run the parts **in this order**. The images must be built before the core and the apps are deployed.
+- In part 2/5, `srsran-zmq` needs `srsran-gnb` and `srsue` first, so keep this order.
+- You can build just one image again, for example: `bash ~/vm/04-build-images.sh dashboard`. Build logs are in `~/build-<name>.log` inside the VM.
 
 ---
+
 
 ## 6. Daily use
 
@@ -494,6 +542,7 @@ Run these from the `testbed/` folder on your PC.
 | Command | What it does |
 |---|---|
 | `./6g create` | Build the VM (first time only) |
+| `./6g setup` | Install the whole testbed inside the VM (first time only). Run it again to see the progress |
 | `./6g start` | Boot the VM, open the tunnels and the device relay |
 | `./6g stop` | Shut everything down cleanly. Frees all CPU and RAM |
 | `./6g status` | Show VM state, CPU, RAM and disk use |
@@ -517,7 +566,13 @@ kubectl -n sixg-ran rollout restart deploy   # restart all radio parts
 ## 11. Troubleshooting
 
 **`./6g create` says "Run first: sudo bash host/00-install-host.sh"**
-You skipped step 1. Run it, then try again.
+You skipped step 2. Run it, then try again.
+
+**`./6g create` says "VM already exists"**
+The VM was already made. Go on with `./6g setup`. If you really want a new VM, run `./6g destroy` first.
+
+**`./6g create` stops with "Isolation filter is NOT attached"**
+The firewall from step 2 is missing. Run `sudo bash host/00-install-host.sh` again, then `./6g destroy` and `./6g create`.
 
 **"Permission denied" with virsh or libvirt**
 Your user was just added to the `libvirt` group. Log out and log in again (the `6g` command usually handles this by itself).
@@ -537,14 +592,20 @@ Use **Control Panel > Safe network restart**. It restarts parts in the right ord
 **The RIC shows "E2 disconnected" for a minute**
 FlexRIC can restart once when the srsRAN radio reconnects. It recovers by itself within about 1 minute.
 
-**An image build fails in step 6**
-Read the log: `cat ~/build-<name>.log`. Most failures are network timeouts. Run the same build command again for only that image, for example `bash ~/vm/04-build-images.sh flexric`.
+**`./6g setup` says "Setup failed"**
+Look at the error just above that line. Most failures are internet timeouts during a download. Run `./6g setup` again; finished parts go quickly. If an image build failed, its full log is inside the VM: `./6g ssh "cat ~/build-<name>.log"` (for example `build-flexric.log`).
+
+**`./6g setup` seems stuck**
+Part 2/5 (building images) can show no new lines for 20 minutes or more while srsRAN and FlexRIC compile. Check that the VM is busy with `./6g status` (CPU time keeps going up). If you closed the view, run `./6g setup` again to see the progress.
+
+**Docker Hub says "toomanyrequests" (rate limit)**
+Docker Hub limits downloads for anonymous users. Wait about one hour, then run `./6g setup` again.
 
 **Something is badly broken**
 `./6g reset` goes back to your clean snapshot.
 
 **I want to start over completely**
-`./6g destroy`, then begin again at step 2.
+`./6g destroy`, then begin again at step 3 (`./6g create`, then `./6g setup`).
 
 ---
 
