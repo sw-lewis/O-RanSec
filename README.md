@@ -2,7 +2,7 @@
 
 A complete 5G/6G network that runs inside **one virtual machine** on a normal Linux PC.
 
-It is a safe playground (a "cyber-range") for testing network security. Students can run their own AI attacker agents against it, and real devices like drones and phones can connect to it. Everything is built from real open-source software. Nothing is faked.
+It is a safe playground (a "cyber-range") for testing network security. Students can run their own AI attacker agents against it, and real devices like drones and phones can connect to it. Everything is built from real open-source software.
 
 You control everything from a **web dashboard** in your browser.
 
