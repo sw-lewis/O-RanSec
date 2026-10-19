@@ -1,0 +1,137 @@
+# Open5GS 5G core (Gradiant chart open5gs 2.3.4, Open5GS 2.7.5), release "core" in namespace sixg-core.
+# Three slices, each with its own DNN, IP pool and UPF:
+#   eMBB  SST 1 SD 000001  dnn embb   10.45.0.0/16  UPF core-upf  (from this chart)
+#   URLLC SST 2 SD 000002  dnn urllc  10.46.0.0/16  UPF upf-urllc (upf-urllc.yaml)
+#   mMTC  SST 3 SD 000003  dnn mmtc   10.47.0.0/16  UPF upf-mmtc  (upf-mmtc.yaml)
+
+# Subscribers. Key/OPC are the well-known UERANSIM test values (a deliberate weakness).
+# The chart joins these with "&&"; "|| true" lets re-runs skip IMSIs that already exist (unique index).
+populate:
+  enabled: true
+  initCommands:
+    # eMBB phones
+    - open5gs-dbctl add_ue_with_slice 999700000000001 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA embb 1 000001 || true
+    - open5gs-dbctl add_ue_with_slice 999700000000002 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA embb 1 000001 || true
+    - open5gs-dbctl add_ue_with_slice 999700000000003 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA embb 1 000001 || true
+    # srsUE on the srsRAN ZMQ radio (eMBB)
+    - open5gs-dbctl add_ue_with_slice 999700000000301 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA embb 1 000001 || true
+    # URLLC: drone link and a control device
+    - open5gs-dbctl add_ue_with_slice 999700000000101 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA urllc 2 000002 || true
+    - open5gs-dbctl add_ue_with_slice 999700000000102 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA urllc 2 000002 || true
+    # mMTC IoT sensors
+    - open5gs-dbctl add_ue_with_slice 999700000000201 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA mmtc 3 000003 || true
+    - open5gs-dbctl add_ue_with_slice 999700000000202 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA mmtc 3 000003 || true
+    - open5gs-dbctl add_ue_with_slice 999700000000203 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA mmtc 3 000003 || true
+    - open5gs-dbctl add_ue_with_slice 999700000000204 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA mmtc 3 000003 || true
+    - open5gs-dbctl add_ue_with_slice 999700000000205 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA mmtc 3 000003 || true
+
+mongodb:
+  enabled: true
+  updateStrategy: {type: Recreate}
+  auth:
+    enabled: false
+
+# Every network function runs as exactly one pod and is replaced with Recreate: two AMFs/SMFs/UPFs
+# side by side during a restart confuse the RAN and have crashed the AMF. The small CPU requests
+# exist only so the chart's HorizontalPodAutoscalers (min=max=1) can read CPU and stop warning.
+
+# 4G/EPC and roaming parts are not used.
+hss: {enabled: false}
+mme: {enabled: false}
+pcrf: {enabled: false}
+sgwc: {enabled: false}
+sgwu: {enabled: false}
+sepp: {enabled: false}
+
+webui:
+  enabled: true
+
+nrf:  {metrics: {enabled: true}, updateStrategy: {type: Recreate}, resources: {requests: {cpu: 20m, memory: 32Mi}}}
+scp:  {metrics: {enabled: true}, updateStrategy: {type: Recreate}, resources: {requests: {cpu: 20m, memory: 32Mi}}}
+ausf: {metrics: {enabled: true}, updateStrategy: {type: Recreate}, resources: {requests: {cpu: 20m, memory: 32Mi}}}
+udm:  {metrics: {enabled: true}, updateStrategy: {type: Recreate}, resources: {requests: {cpu: 20m, memory: 32Mi}}}
+udr:  {metrics: {enabled: true}, updateStrategy: {type: Recreate}, resources: {requests: {cpu: 20m, memory: 32Mi}}}
+bsf:  {metrics: {enabled: true}, updateStrategy: {type: Recreate}, resources: {requests: {cpu: 20m, memory: 32Mi}}}
+pcf:
+  updateStrategy: {type: Recreate}
+  resources: {requests: {cpu: 20m, memory: 32Mi}}
+  metrics: {enabled: true}
+
+amf:
+  updateStrategy: {type: Recreate}
+  resources: {requests: {cpu: 20m, memory: 32Mi}}
+  metrics: {enabled: true}
+  config:
+    networkName: "6G Testbed"
+    taiList:
+      - plmn_id: {mcc: "999", mnc: "70"}
+        tac: [1]
+    plmnList:
+      - plmn_id: {mcc: "999", mnc: "70"}
+        s_nssai:
+          - {sst: 1, sd: "000001"}
+          - {sst: 2, sd: "000002"}
+          - {sst: 3, sd: "000003"}
+
+nssf:
+  updateStrategy: {type: Recreate}
+  resources: {requests: {cpu: 20m, memory: 32Mi}}
+  config:
+    nsiList:
+      - {uri: "", sst: 1, sd: "000001"}
+      - {uri: "", sst: 2, sd: "000002"}
+      - {uri: "", sst: 3, sd: "000003"}
+
+# eMBB UPF. PFCP services are headless so SMF<->UPF talk pod-to-pod; a ClusterIP makes
+# conntrack rewrite the UPF's heartbeat source port and breaks node matching.
+upf:
+  updateStrategy: {type: Recreate}
+  resources: {requests: {cpu: 20m, memory: 32Mi}}
+  metrics: {enabled: true}
+  services:
+    pfcp: {clusterIP: None}
+  config:
+    subnetList:
+      - {subnet: 10.45.0.0/16, gateway: 10.45.0.1, dnn: embb, dev: ogstun, mask: 16, createDev: true, enableNAT: true}
+
+smf:
+  updateStrategy: {type: Recreate}
+  resources: {requests: {cpu: 20m, memory: 32Mi}}
+  metrics: {enabled: true}
+  services:
+    pfcp: {clusterIP: None}
+  config:
+    pcrf: {enabled: false}
+  # Full smf.yaml: one SMF serving all three slices, picking the UPF by DNN.
+  customOpen5gsConfig:
+    logger: {level: info}
+    global: {max: {ue: 1024}}
+    smf:
+      sbi:
+        server: [{dev: eth0, port: 7777}]
+        client:
+          scp: [{uri: "http://core-scp-sbi:7777"}]
+      pfcp:
+        server: [{dev: eth0}]
+        client:
+          upf:
+            - {address: core-upf-pfcp, dnn: [embb]}
+            - {address: upf-urllc-pfcp, dnn: [urllc]}
+            - {address: upf-mmtc-pfcp, dnn: [mmtc]}
+      gtpc:
+        server: [{dev: eth0}]
+      gtpu:
+        server: [{dev: eth0}]
+      metrics:
+        server: [{dev: eth0, port: 9090}]
+      session:
+        - {subnet: 10.45.0.0/16, gateway: 10.45.0.1, dnn: embb}
+        - {subnet: 10.46.0.0/16, gateway: 10.46.0.1, dnn: urllc}
+        - {subnet: 10.47.0.0/16, gateway: 10.47.0.1, dnn: mmtc}
+      dns: [8.8.8.8, 8.8.4.4]
+      mtu: 1400
+      info:
+        - s_nssai:
+            - {sst: 1, sd: "000001", dnn: [embb]}
+            - {sst: 2, sd: "000002", dnn: [urllc]}
+            - {sst: 3, sd: "000003", dnn: [mmtc]}

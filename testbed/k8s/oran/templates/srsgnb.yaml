@@ -1,0 +1,152 @@
+# srsRAN Project gNB: ZeroMQ virtual radio to srsUE, N2/N3 to Open5GS, E2 to FlexRIC,
+# live JSON metrics on the remote-control WebSocket (port 8001).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: srsgnb
+  labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ran}
+data:
+  gnb.yml.tpl: |
+    gnb_id: 2
+    ran_node_name: srsgnb
+    cu_cp:
+      inactivity_timer: 7200
+      amf:
+        addr: ${AMF_IP}
+        port: 38412
+        bind_addr: ${POD_IP}
+        supported_tracking_areas:
+          - tac: {{ .Values.tac }}
+            plmn_list:
+              - plmn: "{{ .Values.plmn }}"
+                tai_slice_support_list:
+                  - {sst: 1, sd: 1}
+                  - {sst: 2, sd: 2}
+                  - {sst: 3, sd: 3}
+    cu_up:
+      ngu:
+        socket:
+          - bind_addr: ${POD_IP}
+    ru_sdr:
+      device_driver: zmq
+      device_args: tx_port=tcp://127.0.0.1:2000,rx_port=tcp://127.0.0.1:2001,base_srate={{ .Values.cell.srate }}e6
+      srate: {{ .Values.cell.srate }}
+      tx_gain: 75
+      rx_gain: 75
+    cell_cfg:
+      dl_arfcn: {{ .Values.cell.dlArfcn }}
+      band: {{ .Values.cell.band }}
+      channel_bandwidth_MHz: {{ .Values.cell.bandwidthMHz }}
+      common_scs: 15
+      plmn: "{{ .Values.plmn }}"
+      tac: {{ .Values.tac }}
+      pci: {{ .Values.cell.pci }}
+      pdcch:
+        common: {ss0_index: 0, coreset0_index: {{ .Values.cell.coreset0Index }}}
+        dedicated: {ss2_type: common, dci_format_0_1_and_1_1: false}
+      prach:
+        prach_config_index: 1
+      # 25.10 defaults to 256QAM, which is invalid with the fallback DCI format used for srsUE.
+      pdsch: {mcs_table: qam64}
+      pusch: {mcs_table: qam64}
+      slicing:
+        - {sst: 1, sd: 1}
+        - {sst: 2, sd: 2}
+        - {sst: 3, sd: 3}
+    e2:
+      enable_du_e2: true
+      e2sm_kpm_enabled: true
+      e2sm_rc_enabled: true
+      addr: ${RIC_IP}
+      port: 36421
+      bind_addr: ${POD_IP}
+    remote_control:
+      enabled: true
+      bind_addr: 0.0.0.0
+      port: 8001
+    metrics:
+      enable_json: true
+      layers:
+        enable_rlc: true
+        enable_sched: true
+        enable_mac: true
+        enable_pdcp: true
+        enable_ngap: true
+        enable_rrc: true
+      periodicity:
+        du_report_period: 1000
+    log:
+      filename: stdout
+      all_level: warning
+      ngap_level: info
+      rrc_level: info
+      e2ap_level: info
+    pcap:
+      ngap_enable: true
+      ngap_filename: /pcap/gnb_ngap.pcap
+      e2ap_enable: true
+      e2ap_du_filename: /pcap/gnb_e2ap.pcap
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: srsgnb
+  labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ran, sixg/role: srsgnb}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {sixg/role: srsgnb}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ran, sixg/role: srsgnb}
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+        # One container, supervised by run-pair.sh: gNB first, then srsUE once the ZMQ radio is up;
+        # if either exits both restart. Log lines are prefixed [gnb] / [ue] / [pair].
+        - name: ran
+          image: {{ .Values.images.pair }}
+          imagePullPolicy: Never
+          securityContext:
+            privileged: true
+            capabilities: {add: [NET_ADMIN, SYS_NICE]}
+          env:
+            - {name: AMF_HOST, value: {{ .Values.amfHost }}}
+            - {name: RIC_HOST, value: near-rt-ric.sixg-ric.svc.cluster.local}
+            - name: POD_IP
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+          ports:
+            - {name: ws-metrics, containerPort: 8001}
+          # srsUE does not retry after a reject (e.g. core still booting), and after a core restart it can
+          # keep a dead session: the tunnel must exist AND reach the UPF gateway, else restart the pair.
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  a=$(ip netns exec ue1 ip -4 -o addr show tun_srsue | awk '{print $4}' | cut -d/ -f1)
+                  [ -n "$a" ] || exit 1
+                  ip netns exec ue1 ping -c1 -W3 "${a%.*.*}.0.1" >/dev/null || ip netns exec ue1 ping -c1 -W3 "${a%.*.*}.0.1" >/dev/null
+            initialDelaySeconds: 90
+            timeoutSeconds: 15
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - {name: gnbcfg, mountPath: /cfg/gnb}
+            - {name: uecfg, mountPath: /cfg/ue}
+      volumes:
+        - name: gnbcfg
+          configMap: {name: srsgnb}
+        - name: uecfg
+          configMap: {name: srsue}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: srsgnb
+  labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ran}
+spec:
+  selector: {sixg/role: srsgnb}
+  ports:
+    - {name: ws-metrics, port: 8001}

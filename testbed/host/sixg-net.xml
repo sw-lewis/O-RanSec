@@ -1,0 +1,12 @@
+<!-- Private NAT network for the 6G testbed VM. IPv4 only, no IPv6. -->
+<network>
+  <name>sixg-net</name>
+  <forward mode='nat'/>
+  <bridge name='virbr-6g' stp='on' delay='0'/>
+  <ip address='10.166.0.1' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='10.166.0.100' end='10.166.0.200'/>
+      <host mac='52:54:00:6a:00:10' name='sixg-testbed' ip='10.166.0.10'/>
+    </dhcp>
+  </ip>
+</network>

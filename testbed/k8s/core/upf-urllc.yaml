@@ -1,0 +1,10 @@
+# URLLC slice UPF (Gradiant chart open5gs-upf 2.3.2), release "upf-urllc" in sixg-core.
+fullnameOverride: upf-urllc
+metrics: {enabled: true}
+updateStrategy: {type: Recreate}
+resources: {requests: {cpu: 20m, memory: 32Mi}}
+services:
+  pfcp: {clusterIP: None}  # headless, see core/values.yaml
+config:
+  subnetList:
+    - {subnet: 10.46.0.0/16, gateway: 10.46.0.1, dnn: urllc, dev: ogstun, mask: 16, createDev: true, enableNAT: true}

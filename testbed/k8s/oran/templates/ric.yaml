@@ -1,0 +1,146 @@
+# FlexRIC near-RT RIC (E2 on SCTP 36421 from gNBs, E42 on SCTP 36422 from xApps)
+# and the O-RAN KPM monitoring xApp (xapp_oran_moni).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flexric
+  namespace: sixg-ric
+  labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ric}
+data:
+  ric.conf.tpl: |
+    SM_DIR = "/usr/local/lib/flexric/"
+    Name = "NearRT_RIC"
+    NearRT_RIC_IP = "${POD_IP}"
+    E2_Port = 36421
+    E42_Port = 36422
+  xapp_kpm.conf.tpl: |
+    SM_DIR = "/usr/local/lib/flexric/"
+    Name = "xApp"
+    NearRT_RIC_IP = "${RIC_IP}"
+    E42_Port = 36422
+    # KPM report style 1 (cell/node level), every 1000 ms. Measurements srsRAN's E2SM-KPM supports.
+    Sub_ORAN_SM_List = (
+        { name = "KPM", time = 1000,
+          format = 1,
+          ran_type = "ngran_gNB_DU",  # srsRAN registers its E2 agent as a DU
+          actions = (
+                { name = "DRB.UEThpDl" },
+                { name = "DRB.UEThpUl" },
+                { name = "DRB.RlcSduTransmittedVolumeDL" },
+                { name = "DRB.RlcSduTransmittedVolumeUL" }
+                )
+        }
+    )
+    xApp_DB = {
+        enable = "OFF"
+        ip = "127.0.0.1"
+        dir = "/tmp/"
+        filename = "testdb"
+        username = "xapp"
+        password = "xapp"
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: near-rt-ric
+  namespace: sixg-ric
+  labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ric, sixg/role: ric}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {sixg/role: ric}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ric, sixg/role: ric}
+    spec:
+      containers:
+        - name: ric
+          image: {{ .Values.images.ric }}
+          imagePullPolicy: Never
+          command: [sh, -c]
+          args:
+            - |
+              sed "s/\${POD_IP}/$POD_IP/" /cfg/ric.conf.tpl > /tmp/ric.conf
+              # Watchdog: FlexRIC can spin printing "Pending event timeout happened" after losing an
+              # E2 node (seen once after a cold boot: ~50k lines/s). Identical repeated lines are
+              # collapsed, and a sustained flood (>2000 lines/s for 10 s) restarts the RIC.
+              stdbuf -oL -eL nearRT-RIC -c /tmp/ric.conf 2>&1 | awk -W interactive '
+                { now = systime(); n[now]++
+                  if (n[now] > 2000) { if (!hot[now]++) streak++ } else if (now != last && n[last] <= 2000) streak = 0
+                  if (streak >= 10) { print "[watchdog] RIC log flood for 10 s, restarting"; fflush(); exit 1 }
+                  if ($0 == prev) { rep++; if (now - rep_t >= 5) { print "[watchdog] last line repeated " rep " times"; fflush(); rep = 0; rep_t = now }; next }
+                  if (rep) { print "[watchdog] last line repeated " rep " times"; rep = 0 }
+                  prev = $0; rep_t = now; last = now; print; fflush() }'
+              exit 1
+          env:
+            - name: POD_IP
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+          ports:
+            - {name: e2, containerPort: 36421, protocol: SCTP}
+            - {name: e42, containerPort: 36422, protocol: SCTP}
+          volumeMounts:
+            - {name: cfg, mountPath: /cfg}
+      volumes:
+        - name: cfg
+          configMap: {name: flexric}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: near-rt-ric
+  namespace: sixg-ric
+  labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ric}
+spec:
+  # Headless: SCTP through a ClusterIP is NAT'd and FlexRIC's E42 replies fail (SCTP_SEND_FAILED).
+  clusterIP: None
+  selector: {sixg/role: ric}
+  ports:
+    - {name: e2, port: 36421, protocol: SCTP}
+    - {name: e42, port: 36422, protocol: SCTP}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: xapp-kpm
+  namespace: sixg-ric
+  labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ric, sixg/role: xapp-kpm}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {sixg/role: xapp-kpm}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ric, sixg/role: xapp-kpm}
+    spec:
+      containers:
+        - name: xapp
+          image: {{ .Values.images.ric }}
+          imagePullPolicy: Never
+          command: [bash, -c]
+          # FlexRIC needs an IP, and the xApp exits when no E2 node is connected yet,
+          # so it is wrapped in a retry loop. The RIC IP is looked up again on every start:
+          # after a cold boot DNS can still return the old RIC pod IP, and the xApp then
+          # resends E42 setup to it forever without exiting. A watcher restarts it when the IP moves.
+          args:
+            - |
+              ric_ip() { getent hosts near-rt-ric.sixg-ric.svc.cluster.local | awk '{print $1; exit}'; }
+              trap 'kill $child 2>/dev/null; exit 0' TERM INT   # stop promptly when Kubernetes asks
+              while true; do
+                until RIC_IP=$(ric_ip) && [ -n "$RIC_IP" ]; do sleep 2 & wait $!; done
+                sed "s/\${RIC_IP}/$RIC_IP/" /cfg/xapp_kpm.conf.tpl > /tmp/xapp_kpm.conf
+                stdbuf -oL -eL /opt/flexric/xapps/monitor/xapp_oran_moni -c /tmp/xapp_kpm.conf & child=$!
+                while kill -0 $child 2>/dev/null; do
+                  sleep 10 & wait $!
+                  now=$(ric_ip)
+                  if [ -n "$now" ] && [ "$now" != "$RIC_IP" ]; then
+                    echo "RIC moved from $RIC_IP to $now, restarting xapp"; kill $child 2>/dev/null
+                  fi
+                done
+                wait $child; echo "xapp exited with $?, restarting in 5s"; sleep 5 & wait $!
+              done
+          volumeMounts:
+            - {name: cfg, mountPath: /cfg}
+      volumes:
+        - name: cfg
+          configMap: {name: flexric}

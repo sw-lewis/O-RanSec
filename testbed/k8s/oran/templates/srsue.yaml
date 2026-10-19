@@ -1,0 +1,56 @@
+# srsUE config (runs as the "ue" container in the srsgnb pod): 5G SA on the ZMQ radio, eMBB slice.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: srsue
+  labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ue, sixg/slice: embb}
+data:
+  ue.conf.tpl: |
+    [rf]
+    freq_offset = 0
+    tx_gain = 50
+    rx_gain = 40
+    srate = {{ .Values.cell.srate }}e6
+    nof_antennas = 1
+    device_name = zmq
+    device_args = tx_port=tcp://127.0.0.1:2001,rx_port=tcp://127.0.0.1:2000,base_srate={{ .Values.cell.srate }}e6
+
+    [rat.eutra]
+    dl_earfcn = 2850
+    nof_carriers = 0
+
+    [rat.nr]
+    bands = {{ .Values.cell.band }}
+    nof_carriers = 1
+
+    [rrc]
+    release = 15
+    ue_category = 4
+
+    [usim]
+    mode = soft
+    algo = milenage
+    opc = {{ .Values.ue.opc }}
+    k = {{ .Values.ue.key }}
+    imsi = {{ .Values.ue.imsi }}
+    imei = 353490069873319
+
+    [nas]
+    apn = {{ .Values.ue.apn }}
+    apn_protocol = ipv4
+
+    [slicing]
+    enable = true
+    nssai-sst = {{ .Values.ue.sst }}
+    nssai-sd = {{ .Values.ue.sd }}
+
+    [gw]
+    netns = ue1
+    ip_devname = tun_srsue
+    ip_netmask = 255.255.255.0
+
+    [log]
+    all_level = warning
+    nas_level = info
+    rrc_level = info
+    filename = stdout

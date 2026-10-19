@@ -1,0 +1,103 @@
+# Grafana Alloy 1.20 (chart 1.13.0) as a DaemonSet. Release "alloy" in sixg-obs.
+# Ships to Loki: every container log, every Kubernetes event, and the VM's systemd journal.
+controller: {type: daemonset}
+alloy:
+  mounts:
+    varlog: true
+  configMap:
+    content: |
+      loki.write "default" {
+        endpoint { url = "http://loki.sixg-obs.svc.cluster.local:3100/loki/api/v1/push" }
+      }
+
+      // ---- container logs ----
+      discovery.kubernetes "pods" { role = "pod" }
+
+      discovery.relabel "pods" {
+        targets = discovery.kubernetes.pods.targets
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_component"]
+          target_label  = "component"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_sixg_layer"]
+          target_label  = "layer"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_sixg_slice"]
+          target_label  = "slice"
+        }
+        // test session a pod belongs to (drone test, attack run); used for per-test log export
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_sixg_session"]
+          target_label  = "session"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          target_label  = "__path__"
+          replacement   = "/var/log/pods/*$1/*.log"
+        }
+      }
+
+      local.file_match "pods" { path_targets = discovery.relabel.pods.output }
+
+      loki.source.file "pods" {
+        targets    = local.file_match.pods.targets
+        forward_to = [loki.process.pods.receiver]
+      }
+
+      loki.process "pods" {
+        stage.cri {}
+        // Open5GS writes ANSI colour codes; strip them.
+        stage.replace {
+          expression = "(\\x1b\\[[0-9;]*m)"
+          replace    = ""
+        }
+        // Open5GS: "09/28 13:57:05.376: [amf] WARNING: ..."
+        stage.regex { expression = "^\\d\\d/\\d\\d \\S+: \\[(?P<nf_module>[a-z0-9-]+)\\] (?P<level>[A-Z]+):" }
+        // UERANSIM: "[2026-09-28 13:57:05.399] [ngap] [info] ..."
+        stage.regex { expression = "^\\[[^\\]]+\\] \\[[^\\]]+\\] \\[(?P<level>[a-z]+)\\]" }
+        stage.template {
+          source   = "level"
+          template = "{{`{{ ToLower .Value }}`}}"  // escaped for Helm tpl
+        }
+        stage.labels { values = { level = "" } }
+        forward_to = [loki.write.default.receiver]
+      }
+
+      // ---- Kubernetes events (pod starts, crashes, kills, scheduling) ----
+      loki.source.kubernetes_events "events" {
+        log_format = "logfmt"
+        forward_to = [loki.write.default.receiver]
+      }
+
+      // ---- VM system journal (k3s, containerd, kernel) ----
+      loki.source.journal "node" {
+        path       = "/var/log/journal"
+        labels     = { job = "node-journal" }
+        forward_to = [loki.relabel.journal.receiver]
+      }
+      loki.relabel "journal" {
+        forward_to = [loki.write.default.receiver]
+        rule {
+          source_labels = ["__journal__systemd_unit"]
+          target_label  = "unit"
+        }
+        rule {
+          source_labels = ["__journal_priority_keyword"]
+          target_label  = "level"
+        }
+      }

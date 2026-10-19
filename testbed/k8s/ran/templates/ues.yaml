@@ -1,0 +1,86 @@
+{{- range .Values.ueGroups }}
+{{- $s := index $.Values.slices .slice }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ue-{{ .name }}
+  labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ue, sixg/slice: {{ .slice }}}
+data:
+  ue.yaml: |
+    supi: 'imsi-{{ $.Values.plmn.mcc }}{{ $.Values.plmn.mnc }}{{ .firstMsin }}'
+    mcc: '{{ $.Values.plmn.mcc }}'
+    mnc: '{{ $.Values.plmn.mnc }}'
+    key: '{{ $.Values.key }}'
+    op: '{{ $.Values.opc }}'
+    opType: 'OPC'
+    amf: '8000'
+    imei: '356938035643803'
+    imeiSv: '4370816125816151'
+    gnbSearchList:
+      - ${GNB_IP}
+    uacAic: {mps: false, mcs: false}
+    uacAcc: {normalClass: 0, class11: false, class12: false, class13: false, class14: false, class15: false}
+    sessions:
+      - type: 'IPv4'
+        apn: '{{ .slice }}'
+        slice: {sst: {{ $s.sst }}, sd: {{ $s.sd }}}
+    configured-nssai:
+      - {sst: {{ $s.sst }}, sd: {{ $s.sd }}}
+    default-nssai:
+      - {sst: {{ $s.sst }}, sd: {{ $s.sd }}}
+    integrity: {IA1: true, IA2: true, IA3: true}
+    ciphering: {EA1: true, EA2: true, EA3: true}
+    integrityMaxRate: {uplink: 'full', downlink: 'full'}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ue-{{ .name }}
+  labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ue, sixg/slice: {{ .slice }}}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}  # one copy at a time: two gNBs/UEs with the same identity confuse the AMF
+  selector:
+    matchLabels: {sixg/ue-group: {{ .name }}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ue, sixg/slice: {{ .slice }}, sixg/ue-group: {{ .name }}}
+    spec:
+      containers:
+        - name: ue
+          image: {{ $.Values.image }}
+          imagePullPolicy: IfNotPresent
+          args: [ue, -n, "{{ .count }}"]
+          env:
+            - {name: GNB_HOSTNAME, value: {{ $.Values.gnb.name }}}
+          securityContext:
+            privileged: true
+            capabilities: {add: [NET_ADMIN]}
+          # A UE rejected while the core is still starting waits T3502 (12 min) in LIMITED-SERVICE.
+          # If any UE of the group is not registered 2 min after start, restart the group.
+          livenessProbe:
+            exec:
+              # Registered is not enough: after a core restart a UE can keep a dead PDU session
+              # (PS-ACTIVE, tunnel up, nothing gets through). So every tunnel must reach its UPF
+              # gateway (x.y.0.1 of the slice pool), and every UE must have a tunnel.
+              command:
+                - sh
+                - -c
+                - |
+                  for n in $(nr-cli --dump); do nr-cli $n --exec status | grep -q "rm-state: RM-REGISTERED" || exit 1; done
+                  [ "$(ip -br link | grep -c '^uesimtun')" -ge "$(nr-cli --dump | wc -l)" ] || exit 1
+                  for t in $(ip -br link | awk '/^uesimtun/{sub("@.*", "", $1); print $1}'); do
+                    a=$(ip -4 -o addr show "$t" | awk '{print $4}' | cut -d/ -f1)
+                    ping -c1 -W3 -I "$t" "${a%.*.*}.0.1" >/dev/null || ping -c1 -W3 -I "$t" "${a%.*.*}.0.1" >/dev/null || exit 1
+                  done
+            initialDelaySeconds: 120
+            timeoutSeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+          volumeMounts:
+            - {name: config, mountPath: /etc/ueransim/ue.yaml, subPath: ue.yaml}
+      volumes:
+        - name: config
+          configMap: {name: ue-{{ .name }}}
+{{- end }}

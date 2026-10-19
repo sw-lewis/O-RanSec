@@ -1,0 +1,6 @@
+apiVersion: v2
+name: sixg-oran
+description: O-RAN path of the 6G testbed - srsRAN gNB (ZMQ virtual radio, E2 agent), srsUE, FlexRIC near-RT RIC and xApps
+type: application
+version: 0.1.0
+appVersion: "25.10"

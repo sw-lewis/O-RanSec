@@ -1,0 +1,60 @@
+# flowmon DaemonSet: real per-link byte/packet counters from kernel conntrack -> Prometheus.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: flowmon, namespace: sixg-obs}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: sixg-flowmon}
+rules:
+  - apiGroups: [""]
+    resources: [pods, services]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: sixg-flowmon}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: sixg-flowmon}
+subjects: [{kind: ServiceAccount, name: flowmon, namespace: sixg-obs}]
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: flowmon
+  namespace: sixg-obs
+  labels: {app.kubernetes.io/name: flowmon, app.kubernetes.io/part-of: sixg}
+spec:
+  selector: {matchLabels: {app.kubernetes.io/name: flowmon}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: flowmon, app.kubernetes.io/part-of: sixg}
+    spec:
+      serviceAccountName: flowmon
+      hostNetwork: true
+      containers:
+        - name: flowmon
+          image: sixg/flowmon:latest
+          imagePullPolicy: Never
+          securityContext:
+            privileged: true
+          ports: [{name: metrics, containerPort: 9105}]
+          resources: {requests: {cpu: 20m, memory: 64Mi}, limits: {memory: 256Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flowmon
+  namespace: sixg-obs
+  labels: {app.kubernetes.io/name: flowmon}
+spec:
+  selector: {app.kubernetes.io/name: flowmon}
+  ports: [{name: metrics, port: 9105}]
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: flowmon
+  namespace: sixg-obs
+spec:
+  selector: {matchLabels: {app.kubernetes.io/name: flowmon}}
+  endpoints: [{port: metrics, interval: 5s}]

@@ -1,0 +1,28 @@
+images:
+  gnb: sixg/srsran-gnb:25.10
+  ue: sixg/srsue:25.10
+  pair: sixg/srsran-zmq:25.10   # gNB + srsUE supervised together (images/srsran-zmq)
+  ric: sixg/flexric:73650812
+
+plmn: "99970"
+tac: 1
+amfHost: core-amf-ngap.sixg-core.svc.cluster.local
+
+# srsUE subscriber (added to Open5GS in k8s/core/values.yaml), eMBB slice.
+ue:
+  imsi: "999700000000301"
+  key: 465B5CE8B199B49FAA5F0A2EE238A6BC
+  opc: E8ED289DEBA952E4283B54E88E6183CA
+  apn: embb
+  sst: 1
+  sd: 1
+
+# Cell: band 3 FDD, 10 MHz, 15 kHz SCS, 11.52 Msps - values from srsRAN's current
+# near-RT RIC tutorial (docs/source/tutorials/source/near-rt-ric/source/.config/gnb_zmq.yaml).
+cell:
+  dlArfcn: 368500
+  band: 3
+  bandwidthMHz: 10
+  pci: 1
+  srate: 11.52
+  coreset0Index: 6

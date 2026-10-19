@@ -1,0 +1,10 @@
+# mMTC slice UPF (Gradiant chart open5gs-upf 2.3.2), release "upf-mmtc" in sixg-core.
+fullnameOverride: upf-mmtc
+metrics: {enabled: true}
+updateStrategy: {type: Recreate}
+resources: {requests: {cpu: 20m, memory: 32Mi}}
+services:
+  pfcp: {clusterIP: None}  # headless, see core/values.yaml
+config:
+  subnetList:
+    - {subnet: 10.47.0.0/16, gateway: 10.47.0.1, dnn: mmtc, dev: ogstun, mask: 16, createDev: true, enableNAT: true}

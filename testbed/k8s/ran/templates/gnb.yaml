@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.gnb.name }}
+  labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ran, sixg/role: gnb}
+data:
+  gnb.yaml: |
+    mcc: '{{ .Values.plmn.mcc }}'
+    mnc: '{{ .Values.plmn.mnc }}'
+    nci: '{{ .Values.gnb.nci }}'
+    idLength: 32
+    tac: {{ .Values.tac }}
+    linkIp: ${RADIO_BIND_IP}
+    ngapIp: ${N2_BIND_IP}
+    gtpIp: ${N3_BIND_IP}
+    amfConfigs:
+      - address: ${AMF_IP}
+        port: 38412
+    slices:
+    {{- range $name, $s := .Values.slices }}
+      - sst: {{ $s.sst }}
+        sd: {{ $s.sd }}
+    {{- end }}
+    ignoreStreamIds: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.gnb.name }}
+  labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ran, sixg/role: gnb}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}  # one copy at a time: two gNBs/UEs with the same identity confuse the AMF
+  selector:
+    matchLabels: {sixg/role: gnb, sixg/gnb: {{ .Values.gnb.name }}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ran, sixg/role: gnb, sixg/gnb: {{ .Values.gnb.name }}}
+    spec:
+      containers:
+        - name: gnb
+          image: {{ .Values.image }}
+          imagePullPolicy: IfNotPresent
+          args: [gnb]
+          env:
+            - {name: AMF_HOSTNAME, value: {{ .Values.gnb.amfHost }}}
+            - {name: N2_IFACE, value: eth0}
+            - {name: N3_IFACE, value: eth0}
+            - {name: RADIO_IFACE, value: eth0}
+          ports:
+            - {name: radio, containerPort: 4997, protocol: UDP}
+            - {name: gtpu, containerPort: 2152, protocol: UDP}
+          # UERANSIM's gNB does not reconnect when the AMF restarts; let Kubernetes restart it.
+          livenessProbe:
+            exec:
+              # is-ngap-up stays true after the AMF restarts, so also require an associated AMF
+              command: [sh, -c, 'n=$(nr-cli --dump | head -1); nr-cli "$n" --exec status | grep -q "is-ngap-up: true" && nr-cli "$n" --exec amf-list | grep -q "id:"']
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
+          volumeMounts:
+            - {name: config, mountPath: /etc/ueransim/gnb.yaml, subPath: gnb.yaml}
+      volumes:
+        - name: config
+          configMap: {name: {{ .Values.gnb.name }}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.gnb.name }}
+  labels: {app.kubernetes.io/part-of: sixg, sixg/layer: ran}
+spec:
+  selector: {sixg/role: gnb, sixg/gnb: {{ .Values.gnb.name }}}
+  ports:
+    - {name: radio, port: 4997, protocol: UDP}
+    - {name: gtpu, port: 2152, protocol: UDP}

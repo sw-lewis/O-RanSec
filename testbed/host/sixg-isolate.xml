@@ -1,0 +1,53 @@
+<!--
+  Firewall on the VM's network card.
+  Allowed out of the VM: DHCP, DNS to the gateway, replies to host SSH, and the public internet.
+  Blocked: the host itself, the home LAN and every other private range, and all IPv6.
+  Lower priority number = checked first.
+-->
+<filter name='sixg-isolate' chain='root'>
+  <uuid>62e2ff3d-1250-40e0-a58f-fa9fcb8dcf43</uuid>
+  <!-- DHCP -->
+  <rule action='accept' direction='out' priority='100'>
+    <udp srcportstart='68' dstportstart='67'/>
+  </rule>
+  <!-- DNS to the libvirt gateway only -->
+  <rule action='accept' direction='out' priority='100'>
+    <udp dstipaddr='10.166.0.1' dstportstart='53'/>
+  </rule>
+  <rule action='accept' direction='out' priority='100'>
+    <tcp dstipaddr='10.166.0.1' dstportstart='53'/>
+  </rule>
+  <!-- Host relay -> device gateways (Kubernetes NodePorts, UDP); replies follow connection tracking -->
+  <rule action='accept' direction='in' priority='100'>
+    <udp srcipaddr='10.166.0.1' dstportstart='30000' dstportend='32767'/>
+  </rule>
+  <!-- Host may SSH into the VM (replies are allowed by connection tracking) -->
+  <rule action='accept' direction='in' priority='100'>
+    <tcp srcipaddr='10.166.0.1' dstportstart='22'/>
+  </rule>
+
+  <!-- Block host, LAN and all private / special ranges -->
+  <rule action='drop' direction='out' priority='200'>
+    <all dstipaddr='10.0.0.0' dstipmask='8'/>
+  </rule>
+  <rule action='drop' direction='out' priority='200'>
+    <all dstipaddr='172.16.0.0' dstipmask='12'/>
+  </rule>
+  <rule action='drop' direction='out' priority='200'>
+    <all dstipaddr='192.168.0.0' dstipmask='16'/>
+  </rule>
+  <rule action='drop' direction='out' priority='200'>
+    <all dstipaddr='169.254.0.0' dstipmask='16'/>
+  </rule>
+  <rule action='drop' direction='out' priority='200'>
+    <all dstipaddr='100.64.0.0' dstipmask='10'/>
+  </rule>
+  <rule action='drop' direction='out' priority='200'>
+    <all dstipaddr='224.0.0.0' dstipmask='4'/>
+  </rule>
+
+  <!-- No IPv6 at all -->
+  <rule action='drop' direction='inout' priority='200'>
+    <all-ipv6/>
+  </rule>
+</filter>

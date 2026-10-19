@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# 6G testbed launcher (runs on the host PC).
+#   6g create     build the isolated VM (first time only)
+#   6g start      boot the VM and open the dashboard tunnel
+#   6g stop       shut the VM down (frees all CPU and RAM)
+#   6g status     show VM state and resource use
+#   6g ssh        shell inside the VM
+#   6g snapshot N save a snapshot named N
+#   6g reset [N]  roll back to snapshot N (default: clean)
+#   6g destroy    delete the VM and its disk
+set -euo pipefail
+
+VM=sixg-testbed
+NET=sixg-net
+VM_IP=10.166.0.10
+VCPUS=10
+RAM_MB=20480
+DISK_GB=200
+DASH_PORT=8660
+IMG_DIR=/var/lib/libvirt/images/sixg
+BASE_URL=https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
+BASE_IMG=$IMG_DIR/jammy-base.img
+DISK=$IMG_DIR/$VM.qcow2
+
+ROOT="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+KEY=$ROOT/keys/sixg_ed25519
+TUNNEL_SOCK=$ROOT/keys/.tunnel.sock
+RELAY_PID=$ROOT/keys/.relay.pid
+export LIBVIRT_DEFAULT_URI=qemu:///system
+
+# Group membership from the install step only applies after re-login; sg picks it up now.
+if ! id -nG | grep -qw libvirt && getent group libvirt | grep -qw "$(id -un)"; then
+  exec sg libvirt -c "$(printf '%q ' "$0" "$@")"
+fi
+
+say() { printf '\033[1;36m[6g]\033[0m %s\n' "$*"; }
+die() { printf '\033[1;31m[6g]\033[0m %s\n' "$*" >&2; exit 1; }
+
+SSH_OPTS=(-i "$KEY" -o StrictHostKeyChecking=accept-new
+          -o UserKnownHostsFile="$ROOT/keys/known_hosts" -o ConnectTimeout=5)
+
+vm_state() {
+  if virsh dominfo "$VM" &>/dev/null; then virsh domstate "$VM" | head -1
+  else echo "not created"; fi
+}
+
+wait_ssh() {
+  say "Waiting for the VM to answer on SSH"
+  for _ in $(seq 1 120); do
+    ssh "${SSH_OPTS[@]}" -o BatchMode=yes "sixg@$VM_IP" true 2>/dev/null && return 0
+    sleep 2
+  done
+  die "VM did not come up on SSH"
+}
+
+net_up()   { [[ $(virsh net-info $NET | awk '/Active/{print $2}') == yes ]] || virsh net-start $NET >/dev/null; }
+net_down() { [[ $(virsh net-info $NET | awk '/Active/{print $2}') == no ]] || virsh net-destroy $NET >/dev/null; }
+
+# Host ports -> in-cluster services (Service IPs are looked up in the VM at start).
+TUNNELS=("$DASH_PORT sixg-control dashboard 80" "8661 sixg-obs kps-grafana 80" "8662 sixg-core core-webui 9999")
+
+tunnel_up() {
+  tunnel_down
+  local args=() port ns svc sport ip
+  for _ in $(seq 1 40); do  # right after boot k3s may still be starting
+    args=()
+    for t in "${TUNNELS[@]}"; do
+      read -r port ns svc sport <<<"$t"
+      ip=$(ssh "${SSH_OPTS[@]}" -o BatchMode=yes "sixg@$VM_IP" \
+           "sudo k3s kubectl -n $ns get svc $svc -o jsonpath='{.spec.clusterIP}'" 2>/dev/null) || ip=""
+      [[ -n $ip ]] && args+=(-L "127.0.0.1:$port:$ip:$sport")
+    done
+    [[ ${#args[@]} -eq $((${#TUNNELS[@]} * 2)) ]] && break
+    sleep 3
+  done
+  [[ ${#args[@]} -gt 0 ]] || die "No testbed services found in the VM"
+  ssh "${SSH_OPTS[@]}" -f -N -M -S "$TUNNEL_SOCK" "${args[@]}" "sixg@$VM_IP"
+}
+relay_up() {  # forwards real devices on the hotspot/router to their gateways (host/relay.py)
+  relay_down
+  nohup python3 "$ROOT/host/relay.py" >"$ROOT/keys/relay.log" 2>&1 &
+  echo $! >"$RELAY_PID"
+}
+relay_down() {
+  [[ -f $RELAY_PID ]] && kill "$(cat "$RELAY_PID")" 2>/dev/null || true
+  rm -f "$RELAY_PID"
+}
+
+tunnel_down() {
+  [[ -S $TUNNEL_SOCK ]] && ssh -S "$TUNNEL_SOCK" -O exit "sixg@$VM_IP" 2>/dev/null || true
+  rm -f "$TUNNEL_SOCK"
+}
+
+cmd_create() {
+  [[ $(vm_state) == "not created" ]] || die "VM already exists"
+  command -v virt-install >/dev/null || die "Run first: sudo bash $ROOT/host/00-install-host.sh"
+  [[ -w $IMG_DIR ]] || die "$IMG_DIR missing; run the host install script"
+
+  if [[ ! -f $KEY ]]; then
+    say "Creating SSH key for the VM"
+    ssh-keygen -q -t ed25519 -N '' -C sixg-testbed -f "$KEY"
+  fi
+  if [[ ! -f $BASE_IMG ]]; then
+    say "Downloading Ubuntu 22.04 cloud image"
+    curl -fL --progress-bar -o "$BASE_IMG.part" "$BASE_URL"
+    mv "$BASE_IMG.part" "$BASE_IMG"
+  fi
+
+  say "Creating ${DISK_GB} GB thin disk (grows only as it is used)"
+  qemu-img create -q -f qcow2 -F qcow2 -b "$BASE_IMG" "$DISK" "${DISK_GB}G"
+
+  local ud; ud=$(mktemp)
+  sed "s|__SSH_KEY__|$(cat "$KEY.pub")|" "$ROOT/host/user-data.tpl" > "$ud"
+
+  net_up
+  say "Creating VM: $VCPUS vCPU, $((RAM_MB/1024)) GB RAM, no shared folders, no display"
+  virt-install --name "$VM" --osinfo ubuntu22.04 \
+    --vcpus "$VCPUS" --cpu host-passthrough --memory "$RAM_MB" \
+    --disk "path=$DISK,format=qcow2,bus=virtio" \
+    --network "network=$NET,model=virtio,mac=52:54:00:6a:00:10,filterref.filter=sixg-isolate" \
+    --cloud-init "user-data=$ud" \
+    --graphics none --sound none --noautoconsole --import
+  rm -f "$ud"
+  virsh autostart --disable "$VM" >/dev/null
+
+  virsh dumpxml "$VM" | grep -q "filterref filter='sixg-isolate'" \
+    || die "Isolation filter is NOT attached. Stopping here for safety."
+
+  wait_ssh
+  say "Waiting for first-boot setup (updates + packages)"
+  ssh "${SSH_OPTS[@]}" "sixg@$VM_IP" \
+    'until [ -f /var/lib/sixg-cloud-init-done ]; do sleep 5; done; cloud-init status --wait >/dev/null; cloud-init status'
+
+  # virt-install turns the first reboot into a power-off, so do a clean off + on.
+  say "Restarting once to load the updated kernel"
+  virsh shutdown "$VM" >/dev/null
+  for _ in $(seq 1 60); do [[ $(vm_state) == "shut off" ]] && break; sleep 2; done
+  virsh start "$VM" >/dev/null; wait_ssh
+  say "VM ready. Next: 6g start"
+}
+
+cmd_start() {
+  case $(vm_state) in
+    "not created") die "Run: 6g create" ;;
+    running) say "Already running" ;;
+    *) net_up; virsh start "$VM" >/dev/null; say "Booting" ;;
+  esac
+  wait_ssh
+  tunnel_up
+  relay_up
+  say "Running. Dashboard: http://127.0.0.1:$DASH_PORT  Grafana: http://127.0.0.1:8661  Open5GS WebUI: http://127.0.0.1:8662"
+}
+
+cmd_stop() {
+  relay_down
+  tunnel_down
+  if [[ $(vm_state) == running ]]; then
+    # Stop k3s and its containers first; otherwise the OS shutdown waits on every container
+    # and runs past the timeout. Databases (MongoDB, Prometheus, Loki) recover from their WAL.
+    say "Stopping the testbed containers"
+    ssh "${SSH_OPTS[@]}" -o BatchMode=yes "sixg@$VM_IP" \
+      'sudo systemctl stop k3s; sudo /usr/local/bin/k3s-killall.sh >/dev/null 2>&1; sync' 2>/dev/null || true
+    say "Shutting down the VM"
+    virsh shutdown "$VM" >/dev/null
+    for _ in $(seq 1 90); do [[ $(vm_state) == "shut off" ]] && break; sleep 2; done
+    [[ $(vm_state) == "shut off" ]] || { say "Forcing power off"; virsh destroy "$VM" >/dev/null; }
+  fi
+  net_down
+  say "Stopped. The VM now uses no CPU or RAM."
+}
+
+cmd_status() {
+  echo "VM:      $(vm_state)"
+  echo "Network: $(virsh net-info $NET 2>/dev/null | awk '/Active/{print ($2=="yes")?"up":"down"}')"
+  if [[ $(vm_state) == running ]]; then
+    virsh domstats "$VM" --cpu-total --balloon | awk -F= '
+      /cpu.time/{printf "CPU time: %.0f s\n",$2/1e9}
+      /balloon.rss/{printf "RAM used: %.1f GB\n",$2/1048576}'
+  fi
+  [[ -f $DISK ]] && echo "Disk:    $(du -h "$DISK" | cut -f1) used of ${DISK_GB} GB"
+}
+
+cmd_ssh()      { exec ssh "${SSH_OPTS[@]}" "sixg@$VM_IP" "$@"; }
+
+cmd_snapshot() {
+  local name=${1:?name}
+  say "Saving snapshot '$name'"
+  virsh snapshot-create-as "$VM" "$name" --atomic >/dev/null
+  virsh snapshot-list "$VM"
+}
+
+cmd_reset() {
+  local name=${1:-clean}
+  say "Rolling back to snapshot '$name'"
+  tunnel_down
+  virsh snapshot-revert "$VM" "$name" --force
+  if [[ $(vm_state) == running ]]; then wait_ssh; tunnel_up; fi
+  say "Reset done"
+}
+
+cmd_destroy() {
+  read -rp "Delete VM $VM and its disk? Type YES: " ok
+  [[ $ok == YES ]] || die "Cancelled"
+  cmd_stop || true
+  for s in $(virsh snapshot-list "$VM" --name 2>/dev/null); do virsh snapshot-delete "$VM" "$s" >/dev/null; done
+  virsh undefine "$VM" --nvram 2>/dev/null || virsh undefine "$VM"
+  rm -f "$DISK"
+  say "Deleted. The base image and SSH key are kept."
+}
+
+case ${1:-} in
+  create|start|stop|status|ssh|snapshot|reset|destroy) c=$1; shift; "cmd_$c" "$@" ;;
+  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' ;;
+esac

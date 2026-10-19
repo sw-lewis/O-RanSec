@@ -1,0 +1,5 @@
+# 6G testbed overrides on top of ArduPilot's copter.parm.
+# The mission flies non-stop; a 50 Ah simulated battery lasts about two hours of flight
+# (the default pack is flat after about 10 minutes, 20 Ah after about 45).
+SIM_BATT_CAP_AH 50
+BATT_CAPACITY   50000

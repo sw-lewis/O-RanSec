@@ -1,0 +1,34 @@
+# Simulated RAN built on the official UERANSIM image (gradiant/ueransim).
+image: docker.io/gradiant/ueransim:3.2.6
+
+plmn: {mcc: "999", mnc: "70"}
+tac: 1
+
+# UERANSIM subscriber credentials (same well-known test values as the core).
+key: 465B5CE8B199B49FAA5F0A2EE238A6BC
+opc: E8ED289DEBA952E4283B54E88E6183CA
+
+slices:
+  embb:  {sst: 1, sd: "0x000001"}
+  urllc: {sst: 2, sd: "0x000002"}
+  mmtc:  {sst: 3, sd: "0x000003"}
+
+gnb:
+  name: gnb1
+  nci: "0x000000010"
+  amfHost: core-amf-ngap.sixg-core.svc.cluster.local
+
+# Each group is one pod running `count` UEs with consecutive IMSIs from firstMsin.
+ueGroups:
+  - name: embb-phones
+    slice: embb
+    firstMsin: "0000000001"
+    count: 3
+  - name: urllc-ctrl
+    slice: urllc
+    firstMsin: "0000000102"
+    count: 1
+  - name: mmtc-sensors
+    slice: mmtc
+    firstMsin: "0000000201"
+    count: 5

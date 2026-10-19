@@ -1,0 +1,93 @@
+# The testbed's architecture model: what SHOULD exist and how it SHOULD be connected.
+# Live state (running, healthy, traffic) is always measured, never taken from this file.
+# kind/name point at the real Kubernetes workload; "virtual" nodes have no workload.
+
+layers:
+  - {id: ue,    label: "User Devices",        order: 1}
+  - {id: ran,   label: "Radio Access (RAN)",  order: 2}
+  - {id: ric,   label: "O-RAN Intelligence",  order: 3}
+  - {id: edge,  label: "Edge / MEC",          order: 4}
+  - {id: core,  label: "5G Core (6G base)",   order: 5}
+  - {id: dn,    label: "Data Network",        order: 6}
+  - {id: cloud, label: "O-Cloud & Observability", order: 7}
+
+slices:
+  - {id: embb,  label: "eMBB",  sst: 1, sd: "000001", dnn: embb,  pool: 10.45.0.0/16, color: "#4dabf7"}
+  - {id: urllc, label: "URLLC", sst: 2, sd: "000002", dnn: urllc, pool: 10.46.0.0/16, color: "#f783ac"}
+  - {id: mmtc,  label: "mMTC",  sst: 3, sd: "000003", dnn: mmtc,  pool: 10.47.0.0/16, color: "#69db7c"}
+
+components:
+  # --- UEs ---
+  - {id: ue-embb-phones,  label: "eMBB phones",   layer: ue, ns: sixg-ran, kind: Deployment, software: "UERANSIM UE 3.2.6", slice: embb,  ueGroup: true}
+  - {id: ue-urllc-ctrl,   label: "URLLC device",  layer: ue, ns: sixg-ran, kind: Deployment, software: "UERANSIM UE 3.2.6", slice: urllc, ueGroup: true}
+  - {id: ue-mmtc-sensors, label: "IoT sensors",   layer: ue, ns: sixg-ran, kind: Deployment, software: "UERANSIM UE 3.2.6", slice: mmtc,  ueGroup: true}
+  # srsUE runs next to the gNB in the srsgnb pod (one supervised container, ZMQ over localhost)
+  - {id: srsue,           label: "srsUE",         layer: ue, ns: sixg-ran, kind: Deployment, workload: srsgnb, container: ran, software: "srsUE 25.10 (ZMQ radio)", slice: embb}
+  # --- RAN ---
+  - {id: gnb1,   label: "gNB (UERANSIM)", layer: ran, ns: sixg-ran, kind: Deployment, software: "UERANSIM gNB 3.2.6"}
+  - {id: srsgnb, label: "gNB (srsRAN)",   layer: ran, ns: sixg-ran, kind: Deployment, software: "srsRAN Project 25.10, ZMQ PHY, E2 agent"}
+  # --- O-RAN ---
+  - {id: near-rt-ric, label: "Near-RT RIC", layer: ric, ns: sixg-ric, kind: Deployment, software: "FlexRIC (br-flexric 73650812)"}
+  - {id: xapp-kpm,    label: "KPM xApp",    layer: ric, ns: sixg-ric, kind: Deployment, software: "FlexRIC KPM monitor xApp"}
+  # --- Core ---
+  - {id: core-amf,  label: AMF,  layer: core, ns: sixg-core, kind: Deployment, software: "Open5GS 2.7.5"}
+  - {id: core-smf,  label: SMF,  layer: core, ns: sixg-core, kind: Deployment, software: "Open5GS 2.7.5"}
+  - {id: core-upf,  label: "UPF eMBB",  layer: core, ns: sixg-core, kind: Deployment, software: "Open5GS 2.7.5", slice: embb}
+  - {id: upf-urllc, label: "UPF URLLC", layer: core, ns: sixg-core, kind: Deployment, software: "Open5GS 2.7.5", slice: urllc}
+  - {id: upf-mmtc,  label: "UPF mMTC",  layer: core, ns: sixg-core, kind: Deployment, software: "Open5GS 2.7.5", slice: mmtc}
+  - {id: core-nrf,  label: NRF,  layer: core, ns: sixg-core, kind: Deployment, software: "Open5GS 2.7.5"}
+  - {id: core-scp,  label: SCP,  layer: core, ns: sixg-core, kind: Deployment, software: "Open5GS 2.7.5"}
+  - {id: core-ausf, label: AUSF, layer: core, ns: sixg-core, kind: Deployment, software: "Open5GS 2.7.5"}
+  - {id: core-udm,  label: UDM,  layer: core, ns: sixg-core, kind: Deployment, software: "Open5GS 2.7.5"}
+  - {id: core-udr,  label: UDR,  layer: core, ns: sixg-core, kind: Deployment, software: "Open5GS 2.7.5"}
+  - {id: core-pcf,  label: PCF,  layer: core, ns: sixg-core, kind: Deployment, software: "Open5GS 2.7.5"}
+  - {id: core-nssf, label: NSSF, layer: core, ns: sixg-core, kind: Deployment, software: "Open5GS 2.7.5"}
+  - {id: core-bsf,  label: BSF,  layer: core, ns: sixg-core, kind: Deployment, software: "Open5GS 2.7.5"}
+  - {id: core-mongodb, label: MongoDB, layer: core, ns: sixg-core, kind: Deployment, software: "MongoDB (subscriber DB)"}
+  - {id: core-webui,   label: "Open5GS WebUI", layer: core, ns: sixg-core, kind: Deployment, software: "Open5GS WebUI"}
+  # --- Edge / MEC ---
+  - {id: device-hub, label: "Device live hub", layer: edge, ns: sixg-edge, kind: Deployment, software: "MediaMTX 1.21.1 + Mosquitto 2.0.20 + MAVLink hub"}
+  # --- Data network ---
+  - {id: internet, label: "Internet (N6)", layer: dn, virtual: true}
+  # --- Cloud / observability ---
+  - {id: prometheus-kps-prometheus, label: Prometheus, layer: cloud, ns: sixg-obs, kind: StatefulSet, software: "Prometheus (kube-prometheus-stack 91.8.1)"}
+  - {id: loki,        label: Loki,     layer: cloud, ns: sixg-obs, kind: StatefulSet, software: "Grafana Loki 3.6"}
+  - {id: kps-grafana, label: Grafana,  layer: cloud, ns: sixg-obs, kind: Deployment,  software: "Grafana"}
+  - {id: alloy,       label: Alloy,    layer: cloud, ns: sixg-obs, kind: DaemonSet,   software: "Grafana Alloy 1.20"}
+  - {id: flowmon,     label: flowmon,  layer: cloud, ns: sixg-obs, kind: DaemonSet,   software: "sixg flowmon (conntrack)"}
+
+# Links that should exist. iface names match flowmon's labels.
+links:
+  - {a: ue-embb-phones,  b: gnb1, iface: Uu}
+  - {a: ue-urllc-ctrl,   b: gnb1, iface: Uu}
+  - {a: ue-mmtc-sensors, b: gnb1, iface: Uu}
+  - {a: srsue, b: srsgnb, iface: Uu}
+  - {a: gnb1,   b: core-amf, iface: N2}
+  - {a: srsgnb, b: core-amf, iface: N2}
+  - {a: gnb1,   b: core-upf,  iface: N3}
+  - {a: gnb1,   b: upf-urllc, iface: N3}
+  - {a: gnb1,   b: upf-mmtc,  iface: N3}
+  - {a: srsgnb, b: core-upf,  iface: N3}
+  - {a: core-smf, b: core-upf,  iface: N4}
+  - {a: core-smf, b: upf-urllc, iface: N4}
+  - {a: core-smf, b: upf-mmtc,  iface: N4}
+  - {a: core-upf,  b: internet, iface: N6}
+  - {a: upf-urllc, b: internet, iface: N6}
+  - {a: upf-mmtc,  b: internet, iface: N6}
+  - {a: core-upf,  b: device-hub, iface: N6}
+  - {a: upf-urllc, b: device-hub, iface: N6}
+  - {a: upf-mmtc,  b: device-hub, iface: N6}
+  - {a: srsgnb, b: near-rt-ric, iface: E2}
+  - {a: xapp-kpm, b: near-rt-ric, iface: E42}
+  - {a: core-amf,  b: core-scp, iface: SBI}
+  - {a: core-smf,  b: core-scp, iface: SBI}
+  - {a: core-ausf, b: core-scp, iface: SBI}
+  - {a: core-udm,  b: core-scp, iface: SBI}
+  - {a: core-udr,  b: core-scp, iface: SBI}
+  - {a: core-pcf,  b: core-scp, iface: SBI}
+  - {a: core-nssf, b: core-scp, iface: SBI}
+  - {a: core-bsf,  b: core-scp, iface: SBI}
+  - {a: core-scp,  b: core-nrf, iface: SBI}
+  - {a: core-udr,  b: core-mongodb, iface: DB}
+  - {a: core-pcf,  b: core-mongodb, iface: DB}
+  - {a: core-webui, b: core-mongodb, iface: DB}  # subscriber provisioning UI

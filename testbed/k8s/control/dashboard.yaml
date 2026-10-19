@@ -1,0 +1,140 @@
+# 6G testbed control panel. Reads everything, controls only the testbed's own namespaces.
+apiVersion: v1
+kind: Namespace
+metadata: {name: sixg-control, labels: {sixg/layer: control}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: dashboard, namespace: sixg-control}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: sixg-dashboard-read}
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, services, endpoints, events, nodes, namespaces, configmaps]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets, replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [events.k8s.io]
+    resources: [events]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: sixg-dashboard-read}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: sixg-dashboard-read}
+subjects: [{kind: ServiceAccount, name: dashboard, namespace: sixg-control}]
+---
+# Control rights, bound per namespace below (never cluster-wide).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: sixg-dashboard-control}
+rules:
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets, deployments/scale, statefulsets/scale]
+    verbs: [patch, update]
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create, get]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: sixg-dashboard-control, namespace: sixg-core}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: sixg-dashboard-control}
+subjects: [{kind: ServiceAccount, name: dashboard, namespace: sixg-control}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: sixg-dashboard-control, namespace: sixg-ran}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: sixg-dashboard-control}
+subjects: [{kind: ServiceAccount, name: dashboard, namespace: sixg-control}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: sixg-dashboard-control, namespace: sixg-ric}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: sixg-dashboard-control}
+subjects: [{kind: ServiceAccount, name: dashboard, namespace: sixg-control}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: sixg-dashboard-control, namespace: sixg-obs}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: sixg-dashboard-control}
+subjects: [{kind: ServiceAccount, name: dashboard, namespace: sixg-control}]
+---
+# Device onboarding: the dashboard creates and removes device gateways in sixg-devices.
+apiVersion: v1
+kind: Namespace
+metadata: {name: sixg-devices, labels: {sixg/layer: devices}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: device-manager, namespace: sixg-devices}
+rules:
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch, create, delete, patch]
+  - apiGroups: [""]
+    resources: [configmaps, secrets, services]
+    verbs: [get, list, create, delete]
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create, get]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: device-manager, namespace: sixg-devices}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: device-manager}
+subjects: [{kind: ServiceAccount, name: dashboard, namespace: sixg-control}]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: dashboard-data, namespace: sixg-control}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 5Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: sixg-control
+  labels: {app.kubernetes.io/name: dashboard, app.kubernetes.io/part-of: sixg, sixg/layer: control}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector: {matchLabels: {app.kubernetes.io/name: dashboard}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: dashboard, app.kubernetes.io/part-of: sixg, sixg/layer: control}
+    spec:
+      serviceAccountName: dashboard
+      containers:
+        - name: dashboard
+          image: sixg/dashboard:latest
+          imagePullPolicy: Never
+          ports: [{name: http, containerPort: 8080}]
+          env:
+            - {name: DATA_DIR, value: /data}
+          readinessProbe:
+            httpGet: {path: /api/health, port: 8080}
+            periodSeconds: 5
+          resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {memory: 768Mi}}
+          volumeMounts: [{name: data, mountPath: /data}]
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: dashboard-data}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: dashboard, namespace: sixg-control, labels: {app.kubernetes.io/name: dashboard}}
+spec:
+  selector: {app.kubernetes.io/name: dashboard}
+  ports: [{name: http, port: 80, targetPort: 8080}]

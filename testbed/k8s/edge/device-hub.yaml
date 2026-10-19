@@ -1,0 +1,114 @@
+# Device live hub on the edge (MEC): what connected devices send through their 5G sessions.
+#   hub        MAVLink telemetry (udp/14551-14570, one port per drone) + MQTT aggregation, HTTP API :8000
+#   mosquitto  Eclipse Mosquitto MQTT broker :1883 (IoT sensors, phones), topics devices/<id>/...
+#   mediamtx   MediaMTX video server: SRT udp/8890, RTMP :1935, RTSP :8554 in; HLS :8888 out; API :9997
+apiVersion: v1
+kind: Namespace
+metadata: {name: sixg-edge, labels: {sixg/layer: edge}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: device-hub, namespace: sixg-edge}
+data:
+  mosquitto.conf: |
+    listener 1883 0.0.0.0
+    allow_anonymous true
+    persistence false
+    log_dest stdout
+    log_type error
+    log_type warning
+    log_type notice
+    connection_messages true
+  mediamtx.yml: |
+    logLevel: info
+    api: yes
+    apiAddress: :9997
+    rtsp: yes
+    rtspAddress: :8554
+    rtmp: yes
+    rtmpAddress: :1935
+    srt: yes
+    srtAddress: :8890
+    hls: yes
+    hlsAddress: :8888
+    hlsVariant: lowLatency
+    hlsAllowOrigin: "*"
+    webrtc: no
+    # the cluster is isolated; the dashboard reads the API and streams from inside it
+    authInternalUsers:
+      - user: any
+        pass:
+        ips: []
+        permissions: [{action: publish}, {action: read}, {action: playback}, {action: api}, {action: metrics}]
+    paths:
+      all_others:
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: device-hub
+  namespace: sixg-edge
+  labels: {app.kubernetes.io/part-of: sixg, sixg/layer: edge, sixg/role: device-hub}
+spec:
+  replicas: 1
+  selector: {matchLabels: {sixg/role: device-hub}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/part-of: sixg, sixg/layer: edge, sixg/role: device-hub}
+    spec:
+      containers:
+        - name: hub
+          image: sixg/device-hub:latest
+          imagePullPolicy: Never
+          ports: [{containerPort: 8000}]
+          readinessProbe: {httpGet: {path: /api/drones, port: 8000}, periodSeconds: 5}
+        - name: mosquitto
+          image: docker.io/eclipse-mosquitto:2.0.20
+          ports: [{containerPort: 1883}]
+          volumeMounts: [{name: cfg, mountPath: /mosquitto/config/mosquitto.conf, subPath: mosquitto.conf}]
+        - name: mediamtx
+          image: docker.io/bluenviron/mediamtx:1.21.1
+          ports: [{containerPort: 8890, protocol: UDP}, {containerPort: 1935}, {containerPort: 8554}, {containerPort: 8888}, {containerPort: 9997}]
+          volumeMounts: [{name: cfg, mountPath: /mediamtx.yml, subPath: mediamtx.yml}]
+      volumes:
+        - name: cfg
+          configMap: {name: device-hub}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: device-hub
+  namespace: sixg-edge
+  labels: {app.kubernetes.io/part-of: sixg}
+spec:
+  # fixed address: devices (e.g. phones over WireGuard) are told to send here
+  clusterIP: 10.43.100.100
+  selector: {sixg/role: device-hub}
+  ports:
+    - {name: api, port: 8000}
+    - {name: mqtt, port: 1883}
+    - {name: srt, port: 8890, protocol: UDP}
+    - {name: rtmp, port: 1935}
+    - {name: rtsp, port: 8554}
+    - {name: hls, port: 8888}
+    - {name: mtx-api, port: 9997}
+    - {name: mav-14551, port: 14551, protocol: UDP}
+    - {name: mav-14552, port: 14552, protocol: UDP}
+    - {name: mav-14553, port: 14553, protocol: UDP}
+    - {name: mav-14554, port: 14554, protocol: UDP}
+    - {name: mav-14555, port: 14555, protocol: UDP}
+    - {name: mav-14556, port: 14556, protocol: UDP}
+    - {name: mav-14557, port: 14557, protocol: UDP}
+    - {name: mav-14558, port: 14558, protocol: UDP}
+    - {name: mav-14559, port: 14559, protocol: UDP}
+    - {name: mav-14560, port: 14560, protocol: UDP}
+    - {name: mav-14561, port: 14561, protocol: UDP}
+    - {name: mav-14562, port: 14562, protocol: UDP}
+    - {name: mav-14563, port: 14563, protocol: UDP}
+    - {name: mav-14564, port: 14564, protocol: UDP}
+    - {name: mav-14565, port: 14565, protocol: UDP}
+    - {name: mav-14566, port: 14566, protocol: UDP}
+    - {name: mav-14567, port: 14567, protocol: UDP}
+    - {name: mav-14568, port: 14568, protocol: UDP}
+    - {name: mav-14569, port: 14569, protocol: UDP}
+    - {name: mav-14570, port: 14570, protocol: UDP}

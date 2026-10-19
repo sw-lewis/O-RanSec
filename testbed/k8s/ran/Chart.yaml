@@ -1,0 +1,6 @@
+apiVersion: v2
+name: sixg-ran
+description: UERANSIM gNB (all three slices) and slice-specific UE groups for the 6G testbed
+type: application
+version: 0.1.0
+appVersion: "3.2.6"

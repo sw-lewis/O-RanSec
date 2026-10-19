@@ -1,0 +1,19 @@
+# Documentation (kept local only)
+*.docx
+proposal-assets/
+demo-assets/
+guide-assets/
+
+# Secrets and runtime files
+testbed/keys/
+*.log
+
+# Build output and dependencies
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.tsbuildinfo
