@@ -26,6 +26,14 @@
     <tcp srcipaddr='10.166.0.1' dstportstart='22'/>
   </rule>
 
+  <!-- sl04 RAN node (CU/DU): N2, N3 to the core -->
+  <rule action='accept' direction='in' priority='150'>
+    <all srcipaddr='192.168.2.14'/>
+  </rule>
+  <rule action='accept' direction='out' priority='150'>
+    <all dstipaddr='192.168.2.14'/>
+  </rule>
+
   <!-- Block host, LAN and all private / special ranges -->
   <rule action='drop' direction='out' priority='200'>
     <all dstipaddr='10.0.0.0' dstipmask='8'/>
