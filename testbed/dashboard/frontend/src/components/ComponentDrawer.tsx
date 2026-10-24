@@ -61,7 +61,7 @@ function Details({ c, links }: { c: Component; links: Link[] }) {
       <SimpleGrid cols={2} spacing="xs">
         <Field k="Software" v={c.software ?? "–"} />
         <Field k="Layer" v={c.layer} />
-        <Field k="Namespace" v={c.ns ?? "–"} />
+        <Field k={c.external ? "Host" : "Namespace"} v={c.external ? `${c.host ?? "external"} (outside the VM)` : c.ns ?? "–"} />
         <Field k="Workload" v={c.virtual ? "–" : `${c.kind ?? ""} ${wl}${c.container ? ` / ${c.container}` : ""}`} />
         <Field k="CPU" v={`${num(c.cpu * 1000)} mCPU`} />
         <Field k="Memory" v={bytes(c.mem)} />

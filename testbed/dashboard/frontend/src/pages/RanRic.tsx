@@ -5,7 +5,34 @@ import { levelColor } from "../components/ComponentDrawer";
 import { bps, clock, dur, num } from "../fmt";
 import type { LogLine, State } from "../types";
 
-type Srs = { connected: boolean; error: string | null; age: number | null; reports: Record<string, unknown> };
+type Srs = { connected: boolean; error: string | null; age: number | null; reports: Record<string, unknown>;
+             configured?: boolean; url?: string };
+type E2Node = { name: string | null; status: string; plmn?: string | null; nbId?: string | null };
+type Ric = { configured: boolean; reachable: boolean; error: string | null; url?: string; age?: number | null; nodes: E2Node[] };
+
+function RicNodes({ ric }: { ric: Ric | null | undefined }) {
+  if (!ric) return <Text size="xs" c="dimmed">Loading…</Text>;
+  if (!ric.configured) return <Text size="xs" c="dimmed">{ric.error}</Text>;
+  return (
+    <Stack gap={6}>
+      {ric.error && <Text size="xs" c="red">{ric.error}</Text>}
+      <Table className="dense" striped withRowBorders={false}>
+        <Table.Thead><Table.Tr><Table.Th>E2 node</Table.Th><Table.Th>Connection</Table.Th><Table.Th>PLMN</Table.Th><Table.Th>gNB ID</Table.Th></Table.Tr></Table.Thead>
+        <Table.Tbody>
+          {ric.nodes.length === 0 && <Table.Tr><Table.Td colSpan={4}><Text size="xs" c="dimmed">No E2 nodes registered with this RIC.</Text></Table.Td></Table.Tr>}
+          {ric.nodes.map((n) => (
+            <Table.Tr key={n.name ?? ""} className="mono">
+              <Table.Td>{n.name}</Table.Td>
+              <Table.Td><Badge size="sm" variant="light" color={n.status === "CONNECTED" ? "teal" : "red"}>{n.status}</Badge></Table.Td>
+              <Table.Td>{n.plmn ?? "–"}</Table.Td><Table.Td>{n.nbId ?? "–"}</Table.Td>
+            </Table.Tr>
+          ))}
+        </Table.Tbody>
+      </Table>
+      <Text size="xs" c="dimmed">From the E2 Manager API at {ric.url}. KPM itself is read by the xApps running on sl04.</Text>
+    </Stack>
+  );
+}
 type SrsUe = Record<string, number>;
 type SrsCell = { cell_metrics: Record<string, number>; ue_list: SrsUe[] };
 
@@ -67,6 +94,8 @@ function LogBox({ query, height = 260 }: { query: string; height?: number }) {
 export function RanRic({ state }: { state: State }) {
   const gnb = usePoll<Record<string, unknown>>("/api/ran/gnb/gnb1", 8000);
   const srs = usePoll<Srs>("/api/ran/srsgnb", 2000);
+  const sl04 = usePoll<Srs>("/api/ran/sl04", 2000);
+  const ric = usePoll<Ric>("/api/ric/sl04", 5000);
   const status = (id: string) => state.components.find((c) => c.id === id)?.status ?? "unknown";
 
   return (
@@ -86,6 +115,18 @@ export function RanRic({ state }: { state: State }) {
             <Text size="xs" c="dimmed" mb={6}>Per-UE MAC/PHY view of the ZMQ cell, pushed by the gNB every second. Last report {dur(srs.data?.age)} ago.</Text>
             <SrsRadio reports={srs.data?.reports ?? {}} />
           </Panel>
+          <Panel title="RF lab O-DU on sl04 — live metrics" right={
+            <Group gap={6}>
+              <Badge variant="dot" color={sl04.data?.connected ? "teal" : "red"}>{sl04.data?.connected ? "subscribed" : "not connected"}</Badge>
+              <StatusBadge status={status("sl04-du")} />
+            </Group>}>
+            {sl04.data?.error && <Text size="xs" c="dimmed">{sl04.data.error}</Text>}
+            <Text size="xs" c="dimmed" mb={6}>
+              Per-UE MAC/PHY view of the sl04 cell (O-DU of the CU/DU split), from {sl04.data?.url ?? "its metrics WebSocket"}.
+              Last report {dur(sl04.data?.age)} ago.
+            </Text>
+            <SrsRadio reports={sl04.data?.reports ?? {}} />
+          </Panel>
         </Stack>
       </Grid.Col>
       <Grid.Col span={{ base: 12, xl: 6 }}>
@@ -99,6 +140,9 @@ export function RanRic({ state }: { state: State }) {
               printed in that order by FlexRIC's example monitor.
             </Text>
             <LogBox query={'{namespace="sixg-ric", container="xapp"} |~ "meas|subscribes|E42|E2 node"'} height={300} />
+          </Panel>
+          <Panel title="OSC near-RT RIC on sl04 — E2 nodes" right={<StatusBadge status={status("sl04-ric")} />}>
+            <RicNodes ric={ric.data} />
           </Panel>
         </Stack>
       </Grid.Col>

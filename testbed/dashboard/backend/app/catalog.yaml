@@ -29,6 +29,13 @@ components:
   # --- O-RAN ---
   - {id: near-rt-ric, label: "Near-RT RIC", layer: ric, ns: sixg-ric, kind: Deployment, software: "FlexRIC (br-flexric 73650812)"}
   - {id: xapp-kpm,    label: "KPM xApp",    layer: ric, ns: sixg-ric, kind: Deployment, software: "FlexRIC KPM monitor xApp"}
+  # --- RF lab on sl04 (outside the VM, reached over the LAN) ---
+  # external: no Kubernetes workload; health comes from the O-DU metrics feed (SL04_WS), flowmon's
+  # N2/N3 view of 192.168.2.14 (sl04-cu) and the OSC RIC's E2 Manager API (SL04_E2MGR_URL).
+  - {id: sl04-ues, label: "UEs (sl04)",            layer: ue,  external: true, virtual: true, role: ues, host: sl04, slice: embb, software: "srsUE 25.10 (ZMQ) / Quectel modems via B210"}
+  - {id: sl04-du,  label: "O-DU (sl04)",           layer: ran, external: true, virtual: true, role: du,  host: sl04, software: "srsRAN Project 25.10 srsdu, E2 agent"}
+  - {id: sl04-cu,  label: "O-CU (sl04)",           layer: ran, external: true, virtual: true, role: cu,  host: sl04, software: "srsRAN Project 25.10 srscu (CU-CP + CU-UP)"}
+  - {id: sl04-ric, label: "OSC near-RT RIC (sl04)", layer: ric, external: true, virtual: true, role: ric, host: sl04, software: "O-RAN SC near-RT RIC (i-release) + Python KPM xApp"}
   # --- Core ---
   - {id: core-amf,  label: AMF,  layer: core, ns: sixg-core, kind: Deployment, software: "Open5GS 2.7.5"}
   - {id: core-smf,  label: SMF,  layer: core, ns: sixg-core, kind: Deployment, software: "Open5GS 2.7.5"}
@@ -78,6 +85,12 @@ links:
   - {a: upf-urllc, b: device-hub, iface: N6}
   - {a: upf-mmtc,  b: device-hub, iface: N6}
   - {a: srsgnb, b: near-rt-ric, iface: E2}
+  # RF lab on sl04: radio, F1 and E2 stay inside sl04; N2/N3 cross the LAN into the VM
+  - {a: sl04-ues, b: sl04-du, iface: Uu}
+  - {a: sl04-du, b: sl04-cu, iface: F1}
+  - {a: sl04-cu, b: core-amf, iface: N2}
+  - {a: sl04-cu, b: core-upf, iface: N3}
+  - {a: sl04-du, b: sl04-ric, iface: E2}
   - {a: xapp-kpm, b: near-rt-ric, iface: E42}
   - {a: core-amf,  b: core-scp, iface: SBI}
   - {a: core-smf,  b: core-scp, iface: SBI}

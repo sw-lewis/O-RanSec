@@ -22,6 +22,10 @@ async def _start():
     asyncio.create_task(state.hub.run())
     asyncio.create_task(state.logstats.run())
     asyncio.create_task(ran.srs.run())
+    if ran.srs_sl04:
+        asyncio.create_task(ran.srs_sl04.run())
+    if ran.ric_sl04:
+        asyncio.create_task(ran.ric_sl04.run())
     asyncio.create_task(_upgrade_devices())
 
 
@@ -36,7 +40,8 @@ async def _upgrade_devices():
 
 def _component(cid):
     c = state.COMPONENTS.get(cid)
-    if not c or c.get("virtual"):
+    if not c or c.get("virtual") or c.get("external"):
+        # virtual: no workload; external: runs outside the VM (e.g. the RF lab on sl04)
         raise HTTPException(404, f"unknown component {cid}")
     return c
 
@@ -168,6 +173,20 @@ async def ran_gnb(cid: str):
 @app.get("/api/ran/srsgnb")
 async def ran_srsgnb():
     return ran.srs.snapshot()
+
+
+@app.get("/api/ran/sl04")
+async def ran_sl04():
+    """Live per-UE metrics from the RF lab's O-DU on sl04 (same format as srsgnb)."""
+    return {**ran.srs_sl04.snapshot(), "configured": True, "url": ran.srs_sl04.url} if ran.srs_sl04 \
+        else ran.not_configured("SL04_WS")
+
+
+@app.get("/api/ric/sl04")
+async def ric_sl04():
+    """E2 nodes known to the OSC near-RT RIC on sl04 (its E2 Manager API)."""
+    return ran.ric_sl04.snapshot() if ran.ric_sl04 \
+        else {"configured": False, "reachable": False, "error": "SL04_E2MGR_URL not configured", "nodes": []}
 
 
 class UeAction(BaseModel):

@@ -34,6 +34,7 @@ export const IFACE: Record<string, { color: string; label: string }> = {
   N4:   { color: "#f472b6", label: "N4 · PFCP (session rules)" },
   N6:   { color: "#34d399", label: "N6 · data network" },
   SBI:  { color: "#60a5fa", label: "SBI · HTTP/2 core bus" },
+  F1:   { color: "#facc15", label: "F1 · O-DU ↔ O-CU" },
   E2:   { color: "#fb923c", label: "E2 · RAN ↔ RIC" },
   E42:  { color: "#f97316", label: "E42 · xApp ↔ RIC" },
   DB:   { color: "#94a3b8", label: "DB · subscriber store" },

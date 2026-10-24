@@ -5,6 +5,7 @@ import json
 import os
 import time
 
+import httpx
 import websockets
 import yaml
 from pymongo import MongoClient
@@ -12,6 +13,10 @@ from pymongo import MongoClient
 from . import kube
 
 SRSGNB_WS = os.environ.get("SRSGNB_WS", "ws://srsgnb.sixg-ran.svc.cluster.local:8001")
+# RF lab on sl04 (outside the VM): its O-DU's metrics WebSocket and its OSC RIC's E2 Manager API.
+# Empty = not configured; the sl04 components then show as "unknown".
+SL04_WS = os.environ.get("SL04_WS", "")
+SL04_E2MGR = os.environ.get("SL04_E2MGR_URL", "")
 MONGO = os.environ.get("MONGO_URL", "mongodb://core-mongodb.sixg-core.svc.cluster.local:27017/open5gs")
 
 
@@ -75,9 +80,10 @@ def traffic_test(ns, workload, iface="uesimtun0", target="8.8.8.8", count=10):
 # ---------- srsRAN gNB metrics ----------
 
 class SrsMetrics:
-    """Keeps a subscription to the srsRAN gNB metrics WebSocket; stores the latest reports."""
+    """Keeps a subscription to an srsRAN gNB/DU metrics WebSocket; stores the latest reports."""
 
-    def __init__(self):
+    def __init__(self, url):
+        self.url = url
         self.latest = {}
         self.updated = 0.0
         self.connected = False
@@ -86,7 +92,7 @@ class SrsMetrics:
     async def run(self):
         while True:
             try:
-                async with websockets.connect(SRSGNB_WS, open_timeout=5, ping_interval=20) as ws:
+                async with websockets.connect(self.url, open_timeout=5, ping_interval=20) as ws:
                     await ws.send(json.dumps({"cmd": "metrics_subscribe"}))
                     self.connected, self.error = True, None
                     async for msg in ws:
@@ -107,8 +113,59 @@ class SrsMetrics:
         return {"connected": self.connected, "error": self.error,
                 "age": (time.time() - self.updated) if self.updated else None, "reports": self.latest}
 
+    def fresh(self, max_age=10):
+        return self.connected and self.updated and time.time() - self.updated < max_age
 
-srs = SrsMetrics()
+    def ues(self):
+        return [u for c in (self.latest.get("cells") or []) for u in c.get("ue_list", [])]
+
+
+def not_configured(what):
+    return {"connected": False, "configured": False, "error": f"{what} not configured", "age": None, "reports": {}}
+
+
+srs = SrsMetrics(SRSGNB_WS)
+srs_sl04 = SrsMetrics(SL04_WS) if SL04_WS else None
+
+
+class E2Manager:
+    """Polls an O-RAN SC near-RT RIC's E2 Manager REST API for the E2 nodes it knows and their
+    connection state (GET /v1/nodeb/states). Answers 'is the RIC up' and 'which E2 nodes are connected'."""
+
+    def __init__(self, url, period=5):
+        self.url = url.rstrip("/")
+        self.period = period
+        self.nodes = []        # [{"name", "status", "plmn", "nbId"}]
+        self.reachable = False
+        self.error = None
+        self.updated = 0.0
+
+    async def run(self):
+        async with httpx.AsyncClient(timeout=4) as http:
+            while True:
+                try:
+                    r = await http.get(f"{self.url}/v1/nodeb/states")
+                    r.raise_for_status()
+                    nodes = []
+                    for n in r.json() or []:
+                        g = n.get("globalNbId") or {}
+                        nodes.append({"name": n.get("inventoryName") or n.get("ranName"),
+                                      "status": n.get("connectionStatus") or "UNKNOWN",
+                                      "plmn": g.get("plmnId"), "nbId": g.get("nbId")})
+                    self.nodes, self.reachable, self.error, self.updated = nodes, True, None, time.time()
+                except Exception as e:  # RIC down, port not published, or sl04 unreachable
+                    self.reachable, self.error = False, str(e)[:200]
+                await asyncio.sleep(self.period)
+
+    def connected(self, prefix=""):
+        return [n for n in self.nodes if n["status"] == "CONNECTED" and (n["name"] or "").startswith(prefix)]
+
+    def snapshot(self):
+        return {"configured": True, "reachable": self.reachable, "error": self.error, "url": self.url,
+                "age": (time.time() - self.updated) if self.updated else None, "nodes": self.nodes}
+
+
+ric_sl04 = E2Manager(SL04_E2MGR) if SL04_E2MGR else None
 
 
 # ---------- Open5GS subscribers ----------

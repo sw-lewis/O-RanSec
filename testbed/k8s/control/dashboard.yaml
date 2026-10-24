@@ -123,6 +123,9 @@ spec:
           ports: [{name: http, containerPort: 8080}]
           env:
             - {name: DATA_DIR, value: /data}
+            # RF lab on sl04: O-DU metrics WebSocket and OSC RIC E2 Manager API (empty = not shown as live)
+            - {name: SL04_WS, value: "ws://192.168.2.14:8001"}
+            - {name: SL04_E2MGR_URL, value: "http://192.168.2.14:3800"}
           readinessProbe:
             httpGet: {path: /api/health, port: 8080}
             periodSeconds: 5

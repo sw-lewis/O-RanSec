@@ -27,6 +27,11 @@ export const POS: Record<string, { x: number; y: number }> = {
   "upf-mmtc": { x: 1160, y: 690 },
   internet: { x: 1500, y: 570 },
   "device-hub": { x: 1500, y: 720 },
+  // RF lab on sl04 (outside the VM): UEs -> O-DU -F1-> O-CU, with its own OSC RIC under the O-DU
+  "sl04-ues": { x: 0, y: 1240 },
+  "sl04-du": { x: 290, y: 1240 },
+  "sl04-cu": { x: 580, y: 1240 },
+  "sl04-ric": { x: 290, y: 1370 },
 };
 
 export const ZONES = [
@@ -37,6 +42,7 @@ export const ZONES = [
   { id: "z-ric", label: "O-RAN near-RT RIC", x: 550, y: 840, w: 590, h: 140, color: "#fb923c" },
   { id: "z-dn", label: "Data network", x: 1470, y: 530, w: 250, h: 130, color: "#34d399" },
   { id: "z-edge", label: "Edge (MEC)", x: 1470, y: 680, w: 250, h: 130, color: "#e879f9" },
+  { id: "z-sl04", label: "RF lab · sl04 (O-DU / O-CU split, OSC near-RT RIC)", x: -30, y: 1200, w: 860, h: 280, color: "#f472b6" },
 ];
 
 export const NODE_W = 220;

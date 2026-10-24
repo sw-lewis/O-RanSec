@@ -9,6 +9,7 @@ export interface PodInfo {
 export interface Component {
   id: string; label: string; layer: string; ns?: string; kind?: string; software?: string;
   slice?: string; virtual?: boolean; ueGroup?: boolean; device?: boolean; workload?: string; container?: string;
+  external?: boolean; host?: string;
   status: Status; notes: string[]; pods: PodInfo[]; cpu: number; mem: number; desired?: number | null;
 }
 

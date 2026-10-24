@@ -16,7 +16,7 @@ SETTLE = 240  # restarts during the first 4 min after the dashboard starts (VM b
 SESSION_IFACES = {"Uu", "N2", "N3", "N4", "N6", "SBI", "E2", "E42", "DB"}
 MONITORING_NS = {"sixg-obs", "sixg-control"}
 WATCH_NS = {"sixg-core", "sixg-ran", "sixg-ric", "sixg-edge", "sixg-devices", "sixg-attack",
-            "external", "user-plane"}
+            "external", "user-plane", "sl04"}
 
 
 def _by(results, *keys):
@@ -125,9 +125,58 @@ def track_restarts(pods):
                 RESTART_SEEN[k] = now
 
 
+def _has_flow(m, a, iface):
+    return any(v > 0 and l.get("iface") == iface and a in (l.get("src"), l.get("dst"))
+               for l, v in (m.get("link_flows") or []))
+
+
+def external_status(c, m):
+    """Health of a component that runs outside the VM (the RF lab on sl04), from what the
+    testbed can actually observe: its O-DU's metrics feed, its N2/N3 traffic seen by flowmon,
+    and its OSC RIC's E2 Manager API."""
+    role = c.get("role")
+    du, ric = ran.srs_sl04, ran.ric_sl04
+    if role == "du":
+        if not du:
+            return "unknown", ["SL04_WS not configured"]
+        if not du.connected:
+            return "down", [f"metrics feed {du.url} not reachable", *(du.error and [du.error] or [])]
+        if not du.fresh():
+            return "degraded", ["metrics feed connected but no report in the last 10 s"]
+        cells = du.latest.get("cells") or []
+        pci = (cells[0].get("cell_metrics") or {}).get("pci") if cells else None
+        return "up", [f"metrics feed connected ({du.url})", f"{len(cells)} cell(s) active" + (f", PCI {pci}" if pci is not None else ""),
+                      f"{len(du.ues())} UE in cell"]
+    if role == "ues":
+        if not du or not du.fresh():
+            return "unknown", ["O-DU metrics feed not available"]
+        n = len(du.ues())
+        return ("up", [f"{n} UE attached to the sl04 cell"]) if n else ("idle", ["no UE attached to the sl04 cell"])
+    if role == "cu":
+        notes = []
+        n2, n3 = _has_flow(m, c["id"], "N2"), _has_flow(m, c["id"], "N3")
+        notes.append("N2 to AMF established" if n2 else "no N2 association seen")
+        notes.append("N3 to UPF active" if n3 else "no N3 traffic seen")
+        if du and du.fresh():
+            notes.append("O-DU reporting (F1 up)")
+        return ("up" if n2 else "down"), notes
+    if role == "ric":
+        if not ric:
+            return "unknown", ["SL04_E2MGR_URL not configured"]
+        if not ric.reachable:
+            return "down", [f"E2 Manager {ric.url} not reachable", *(ric.error and [ric.error] or [])]
+        notes = [f"E2 node {n['name']}: {n['status']}" for n in ric.nodes] or ["no E2 nodes registered"]
+        if not ric.nodes:
+            return "idle", notes
+        return ("up" if ric.connected() else "degraded"), notes
+    return "unknown", [f"external component with unknown role {role!r}"]
+
+
 def component_status(c, workloads, pods_by_wl, m):
     """Returns (status, notes). status: up | degraded | down | stopped | absent | unknown."""
     notes = []
+    if c.get("external"):
+        return external_status(c, m)
     if c.get("virtual"):
         if c["id"] == "internet":
             rates = m.get("link_rate") or []
@@ -227,6 +276,21 @@ def build_links(m, statuses, device_ids=()):
         srs_bps = sum((u.get("dl_brate") or 0) + (u.get("ul_brate") or 0)
                       for c in cells for u in c.get("ue_list", []))
 
+    # RF lab on sl04: its radio (Uu) and F1 run inside sl04 and E2 terminates on sl04's own RIC,
+    # so none of them pass through the VM's conntrack. Their sources: the O-DU's per-UE bit rates
+    # and the RIC's E2 Manager. (sl04's N2 and N3 do cross the VM and come from flowmon as usual.)
+    sl04 = {}
+    du, ric = ran.srs_sl04, ran.ric_sl04
+    if du and du.fresh():
+        ues = du.ues()
+        air = sum((u.get("dl_brate") or 0) + (u.get("ul_brate") or 0) for u in ues)
+        sl04[("sl04-ues", "sl04-du", "Uu")] = (air, len(ues))
+        cu_up = statuses.get("sl04-cu") == "up"
+        sl04[("sl04-du", "sl04-cu", "F1")] = (air if cu_up else 0, 1 if cu_up else 0)
+    if ric and ric.reachable:
+        # E2 Manager names a DU's E2 node "gnbd_<plmn>_<gnb id>_<du id>"
+        sl04[("sl04-du", "sl04-ric", "E2")] = (0, len(ric.connected("gnbd")))
+
     links = []
     covered = set()
     expected = CATALOG["links"] + [{"a": d, "b": "gnb1", "iface": "Uu"} for d in device_ids]
@@ -237,6 +301,8 @@ def build_links(m, statuses, device_ids=()):
         f = sum_pair(flows, a, b, iface)
         if (a, b, iface) == ("srsue", "srsgnb", "Uu") and srs_bps is not None:
             r, f = srs_bps, 1
+        if (a, b, iface) in sl04:
+            r, f = sl04[(a, b, iface)]
         ends = (statuses.get(a, "unknown"), statuses.get(b, "unknown"))
         if any(s in ("down", "stopped", "absent") for s in ends):
             st = "down"
@@ -299,7 +365,8 @@ async def build():
         statuses[c["id"]] = st
         cp = pods_by_wl.get((c.get("ns"), c.get("workload", c["id"])), [])
         comps.append({
-            **{k: c.get(k) for k in ("id", "label", "layer", "ns", "kind", "software", "slice", "virtual", "ueGroup", "device")},
+            **{k: c.get(k) for k in ("id", "label", "layer", "ns", "kind", "software", "slice", "virtual", "ueGroup", "device",
+                                     "external", "host")},
             "status": st,
             "notes": notes,
             "pods": [{"name": p["name"], "ready": p["ready"], "phase": p["phase"], "ip": p["ip"],

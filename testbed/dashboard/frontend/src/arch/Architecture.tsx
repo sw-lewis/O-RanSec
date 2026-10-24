@@ -18,7 +18,7 @@ function handles(a: { x: number; y: number }, b: { x: number; y: number }) {
 }
 
 export function Architecture({ state, onSelect, selected }: { state: State; onSelect: (id: string) => void; selected: string | null }) {
-  const [ifaces, setIfaces] = useState<string[]>(["Uu", "N2", "N3", "N4", "N6", "SBI", "E2", "E42", "DB", "other"]);
+  const [ifaces, setIfaces] = useState<string[]>(["Uu", "F1", "N2", "N3", "N4", "N6", "SBI", "E2", "E42", "DB", "other"]);
   const [slice, setSlice] = useState("all");
 
   const { nodes, edges } = useMemo(() => {
