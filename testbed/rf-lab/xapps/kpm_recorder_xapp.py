@@ -13,7 +13,7 @@ writes every measurement to a CSV file in long format, one row per value:
                     or IP address; map it with the UE resolver. Empty for node-level reports.
 
 Default is report style 4 (per-UE, all UEs that match a condition every UE satisfies), every
-1 s, with all six O-RAN measurements srsRAN supports.
+1 s, with the four measurements that srsRAN 25.10 reports per UE (see METRICS).
 
 Run inside the python_xapp_runner container (this file goes in oran-sc-ric/xApps/python/):
     docker compose exec python_xapp_runner ./kpm_recorder_xapp.py --out data/kpm.csv
@@ -31,8 +31,9 @@ import urllib.request
 
 from lib.xAppBase import xAppBase
 
-METRICS = ("DRB.UEThpDl,DRB.UEThpUl,DRB.RlcPacketDropRateDl,DRB.PacketSuccessRateUlgNBUu,"
-           "DRB.RlcSduTransmittedVolumeDL,DRB.RlcSduTransmittedVolumeUL")
+# srsRAN 25.10 O-DU, per-UE (style 4): with DRB.RlcPacketDropRateDl or DRB.PacketSuccessRateUlgNBUu
+# in the list the subscription is accepted but no RIC Indication is ever sent, so they are left out.
+METRICS = "DRB.UEThpDl,DRB.UEThpUl,DRB.RlcSduTransmittedVolumeDL,DRB.RlcSduTransmittedVolumeUL"
 FIELDS = ["rx_utc", "collet_start_utc", "e2_node", "report_style", "ue_id", "granul_ms", "metric", "value"]
 
 
@@ -116,10 +117,10 @@ if __name__ == "__main__":
     p.add_argument("--e2mgr_url", default=os.environ.get("E2MGR_URL", "http://10.0.2.11:3800"), help="E2 Manager API, for node discovery")
     p.add_argument("--ue_ids", default="0", help="for style 5: comma-separated UE IDs")
     p.add_argument("--ran_func_id", type=int, default=2, help="E2SM-KPM RAN function ID (srsRAN: 2)")
-    # The RIC's routes deliver RIC Indications to the xApp runner on RMR ports 4560, 4561 and 4562
-    # (each gets a copy). 4561 lets this recorder run alongside kpm_mon_xapp.py (4562).
-    p.add_argument("--http_server_port", type=int, default=8091)
-    p.add_argument("--rmr_port", type=int, default=4561)
+    # Same ports as kpm_mon_xapp.py (the ones the RIC's routes are known to deliver to), so run one
+    # of the two at a time.
+    p.add_argument("--http_server_port", type=int, default=8092)
+    p.add_argument("--rmr_port", type=int, default=4562)
     p.add_argument("--quiet", action="store_true", help="do not print one line per indication")
     a = p.parse_args()
 
