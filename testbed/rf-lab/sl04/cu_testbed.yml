@@ -1,0 +1,36 @@
+# O-CU (CU-CP + CU-UP) on sl04, attached to the testbed core in the Pop!_OS VM.
+# Run: sudo taskset -c 4-11 ~/oran/srsRAN_Project/build/apps/cu/srscu -c cu_testbed.yml
+ran_node_name: cu_cp_sl04
+gnb_id: 411
+gnb_id_bit_length: 22
+gnb_cu_up_id: 0
+
+cu_cp:
+  amf:
+    addr: 10.43.210.84             # testbed AMF (k3s service core-amf-ngap)
+    port: 38412
+    bind_addr: 192.168.2.14        # sl04 LAN address
+    supported_tracking_areas:
+      - tac: 1
+        plmn_list:
+          - plmn: "99970"
+            tai_slice_support_list:
+              - {sst: 1, sd: 1}
+              - {sst: 2, sd: 2}
+              - {sst: 3, sd: 3}
+  inactivity_timer: 7200
+  f1ap:
+    bind_addr: 127.0.10.1          # F1-C: CU-CP listens here for the DU
+
+cu_up:
+  ngu:
+    socket:
+      - bind_addr: 192.168.2.14    # N3: the UPF sends downlink here
+  f1u:
+    socket:
+      - bind_addr: 127.0.10.1      # F1-U: user plane to the DU
+
+log:
+  filename: /tmp/cu.log
+  all_level: info
+  hex_max_size: 0
