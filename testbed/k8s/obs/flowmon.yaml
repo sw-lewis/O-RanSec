@@ -37,6 +37,9 @@ spec:
           imagePullPolicy: Never
           securityContext:
             privileged: true
+          env:
+            # RF lab RAN node (O-CU / O-DU on sl04) reaching the core over the LAN
+            - {name: EXTERNAL_HOSTS, value: "192.168.2.14=sl04-cu:sl04"}
           ports: [{name: metrics, containerPort: 9105}]
           resources: {requests: {cpu: 20m, memory: 64Mi}, limits: {memory: 256Mi}}
 ---

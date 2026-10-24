@@ -17,6 +17,14 @@ POLL = float(os.environ.get("POLL_SECONDS", "1"))
 WINDOW = float(os.environ.get("RATE_WINDOW_SECONDS", "5"))
 NODE_IPS = set(os.environ.get("NODE_IPS", "10.166.0.10,10.42.0.1").split(","))
 KUBELET_IP = os.environ.get("KUBELET_IP", "10.42.0.1")  # source of kubelet health probes
+# Hosts outside the cluster that are part of the testbed, e.g. the RF lab's RAN node:
+# "192.168.2.14=sl04-cu:sl04,..." -> ip -> (name, namespace). Their links keep their 3GPP
+# interface names (N2, N3 ...) instead of being treated as the internet.
+EXTERNAL_HOSTS = {}
+for _entry in filter(None, (e.strip() for e in os.environ.get("EXTERNAL_HOSTS", "").split(","))):
+    _ip, _, _who = _entry.partition("=")
+    _name, _, _ns = _who.partition(":")
+    EXTERNAL_HOSTS[_ip.strip()] = (_name.strip() or _ip.strip(), _ns.strip() or "lab")
 
 # (protocol, server port) -> interface name
 INTERFACES = {
@@ -131,6 +139,8 @@ class Directory:
         with self.lock:
             if ip in self.pods:
                 return self.pods[ip]
+        if ip in EXTERNAL_HOSTS:
+            return EXTERNAL_HOSTS[ip]
         if ip in NODE_IPS:
             return ("vm-node", "host")
         if ip.startswith(("10.45.", "10.46.", "10.47.")):
