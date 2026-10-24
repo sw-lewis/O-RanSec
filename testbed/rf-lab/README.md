@@ -58,6 +58,23 @@ Requirements on sl04:
    ```
    then `docker compose up -d` in that directory.
 
+## Recording KPM
+
+`xapps/kpm_recorder_xapp.py` subscribes to E2SM-KPM (report style 4, per UE, every 1 s, all six
+measurements srsRAN supports) on every connected O-DU and appends each value to a CSV in UTC:
+`rx_utc, collet_start_utc, e2_node, report_style, ue_id, granul_ms, metric, value`.
+
+```bash
+cp testbed/rf-lab/xapps/kpm_recorder_xapp.py ~/oran/oran-sc-ric/xApps/python/
+cd ~/oran/oran-sc-ric
+docker compose exec python_xapp_runner ./kpm_recorder_xapp.py --out data/kpm.csv
+# the file appears on sl04 at ~/oran/oran-sc-ric/xApps/python/data/kpm.csv
+```
+
+It finds the O-DU through the E2 Manager, so it keeps working when the DU's E2 node name
+changes (it includes the PLMN). It listens on RMR port 4561, so it can run alongside
+`kpm_mon_xapp.py`.
+
 ## Start order on sl04 (ZMQ radio)
 
 1. CU, then wait for `N2: Connection to AMF ... completed`.
