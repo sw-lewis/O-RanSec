@@ -61,15 +61,22 @@ Requirements on sl04:
 ## Recording KPM
 
 `xapps/kpm_recorder_xapp.py` subscribes to E2SM-KPM (report style 4, per UE, every 1 s) on every
-connected O-DU with the seven measurements srsRAN 25.10 reports per UE, and appends each value to a
-CSV in UTC: `rx_utc, collet_start_utc, e2_node, report_style, ue_id, granul_ms, metric, value`.
+connected O-DU with all fourteen measurements the srsRAN 25.10 O-DU reports per UE, and appends each
+value to a CSV in UTC: `rx_utc, collet_start_utc, e2_node, report_style, ue_id, granul_ms, metric, value`.
 
 | Measurement | Unit |
 |---|---|
 | `DRB.UEThpDl`, `DRB.UEThpUl` | kbit/s |
 | `DRB.RlcSduTransmittedVolumeDL`, `DRB.RlcSduTransmittedVolumeUL` | kbit per period |
-| `RRU.PrbUsedDl`, `RRU.PrbUsedUl` | mean PRBs per slot (integer) |
+| `RRU.PrbUsedDl`, `RRU.PrbUsedUl` | mean PRBs used per slot by the UE (integer) |
+| `RRU.PrbAvailDl`, `RRU.PrbAvailUl` | cell PRBs minus mean PRBs used (integer) |
+| `RRU.PrbTotDl`, `RRU.PrbTotUl` | PRB usage, % of the cell (integer) |
+| `DRB.RlcSduDelayDl` | DL RLC SDU delay, 0.1 ms units |
 | `DRB.RlcDelayUl` | UL RLC SDU delay, 0.1 ms units |
+| `DRB.AirIfDelayUl` | UL air-interface (CRC) delay, 0.1 ms units |
+| `DRB.RlcPacketDropRateDl` | DL RLC packet drop rate, % |
+
+All fourteen were recorded together in one subscription on 25 Oct 2026 (sl04, ZMQ radio, one srsUE).
 
 ```bash
 # on sl04, from a clone of this repo in ~/O-RanSec
@@ -82,11 +89,11 @@ docker compose exec python_xapp_runner ./kpm_recorder_xapp.py --out data/kpm.csv
 
 It finds the O-DU through the E2 Manager, so it keeps working when the DU's E2 node name
 changes (it includes the PLMN). It uses the same RMR port as `kpm_mon_xapp.py` (4562), so run
-one at a time. Adding `DRB.RlcPacketDropRateDl` or `DRB.PacketSuccessRateUlgNBUu` to a per-UE
-subscription makes the srsRAN 25.10 DU accept it but never send a report. `CQI`, `RSRP` and `RSRQ`
-are declared by the DU but not supported. Older copies of this recorder listened on RMR port 4561 and
-at times received nothing even though the DU log showed `Sending E2 indication`: if a subscription
-succeeds but no rows appear, check that the startup line says `p=4562`.
+one at a time. `DRB.PacketSuccessRateUlgNBUu` is a CU-UP measurement, so the O-DU cannot report it.
+`CQI`, `RSRP` and `RSRQ` are declared by the DU but not supported. Older copies of this recorder
+listened on RMR port 4561 and received nothing even though the DU log showed `Sending E2 indication`
+(this is also what made several measurements look unsupported at first): if a subscription succeeds
+but no rows appear, check that the startup line says `p=4562`.
 
 ## Start order on sl04 (ZMQ radio)
 

@@ -13,7 +13,7 @@ writes every measurement to a CSV file in long format, one row per value:
                     or IP address; map it with the UE resolver. Empty for node-level reports.
 
 Default is report style 4 (per-UE, all UEs that match a condition every UE satisfies), every
-1 s, with the seven measurements that srsRAN 25.10 reports per UE (see METRICS).
+1 s, with the fourteen measurements that the srsRAN 25.10 O-DU reports per UE (see METRICS).
 
 Run inside the python_xapp_runner container (this file goes in oran-sc-ric/xApps/python/):
     docker compose exec python_xapp_runner ./kpm_recorder_xapp.py --out data/kpm.csv
@@ -31,13 +31,26 @@ import urllib.request
 
 from lib.xAppBase import xAppBase
 
-# srsRAN 25.10 O-DU, per-UE (style 4), tested together on 25 Oct 2026:
-#   DRB.UEThpDl/Ul (kbit/s), DRB.RlcSduTransmittedVolumeDL/UL (kbit), RRU.PrbUsedDl/Ul (mean PRBs per
-#   slot, integer), DRB.RlcDelayUl (UL RLC SDU delay, 0.1 ms units).
-# With DRB.RlcPacketDropRateDl or DRB.PacketSuccessRateUlgNBUu in the list the subscription is
-# accepted but no RIC Indication is ever sent, so they are left out. CQI/RSRP/RSRQ are not supported.
-METRICS = ("DRB.UEThpDl,DRB.UEThpUl,DRB.RlcSduTransmittedVolumeDL,DRB.RlcSduTransmittedVolumeUL,"
-           "RRU.PrbUsedDl,RRU.PrbUsedUl,DRB.RlcDelayUl")
+# srsRAN 25.10 O-DU, per-UE (style 4): all fourteen DU measurements below were recorded together in
+# one subscription on 25 Oct 2026 (units from lib/e2/e2sm/e2sm_kpm/e2sm_kpm_du_meas_provider_impl.cpp):
+#   DRB.UEThpDl/Ul                    kbit/s
+#   DRB.RlcSduTransmittedVolumeDL/UL  kbit per period
+#   RRU.PrbUsedDl/Ul                  mean PRBs used per slot by the UE (integer)
+#   RRU.PrbAvailDl/Ul                 cell PRBs minus mean PRBs used (integer)
+#   RRU.PrbTotDl/Ul                   PRB usage, % of the cell (integer)
+#   DRB.RlcSduDelayDl                 DL RLC SDU delay, 0.1 ms units
+#   DRB.RlcDelayUl                    UL RLC SDU delay, 0.1 ms units
+#   DRB.AirIfDelayUl                  UL air-interface (CRC) delay, 0.1 ms units
+#   DRB.RlcPacketDropRateDl           DL RLC packet drop rate, %
+# DRB.PacketSuccessRateUlgNBUu is a CU-UP measurement (not on the DU). CQI, RSRP and RSRQ are declared
+# by the DU but not supported.
+METRICS = ",".join([
+    "DRB.UEThpDl", "DRB.UEThpUl",
+    "DRB.RlcSduTransmittedVolumeDL", "DRB.RlcSduTransmittedVolumeUL",
+    "RRU.PrbUsedDl", "RRU.PrbUsedUl", "RRU.PrbAvailDl", "RRU.PrbAvailUl", "RRU.PrbTotDl", "RRU.PrbTotUl",
+    "DRB.RlcSduDelayDl", "DRB.RlcDelayUl", "DRB.AirIfDelayUl",
+    "DRB.RlcPacketDropRateDl",
+])
 FIELDS = ["rx_utc", "collet_start_utc", "e2_node", "report_style", "ue_id", "granul_ms", "metric", "value"]
 
 
