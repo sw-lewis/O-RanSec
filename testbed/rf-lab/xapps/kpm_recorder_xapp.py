@@ -13,7 +13,7 @@ writes every measurement to a CSV file in long format, one row per value:
                     or IP address; map it with the UE resolver. Empty for node-level reports.
 
 Default is report style 4 (per-UE, all UEs that match a condition every UE satisfies), every
-1 s, with the four measurements that srsRAN 25.10 reports per UE (see METRICS).
+1 s, with the seven measurements that srsRAN 25.10 reports per UE (see METRICS).
 
 Run inside the python_xapp_runner container (this file goes in oran-sc-ric/xApps/python/):
     docker compose exec python_xapp_runner ./kpm_recorder_xapp.py --out data/kpm.csv
@@ -31,9 +31,13 @@ import urllib.request
 
 from lib.xAppBase import xAppBase
 
-# srsRAN 25.10 O-DU, per-UE (style 4): with DRB.RlcPacketDropRateDl or DRB.PacketSuccessRateUlgNBUu
-# in the list the subscription is accepted but no RIC Indication is ever sent, so they are left out.
-METRICS = "DRB.UEThpDl,DRB.UEThpUl,DRB.RlcSduTransmittedVolumeDL,DRB.RlcSduTransmittedVolumeUL"
+# srsRAN 25.10 O-DU, per-UE (style 4), tested together on 25 Oct 2026:
+#   DRB.UEThpDl/Ul (kbit/s), DRB.RlcSduTransmittedVolumeDL/UL (kbit), RRU.PrbUsedDl/Ul (mean PRBs per
+#   slot, integer), DRB.RlcDelayUl (UL RLC SDU delay, 0.1 ms units).
+# With DRB.RlcPacketDropRateDl or DRB.PacketSuccessRateUlgNBUu in the list the subscription is
+# accepted but no RIC Indication is ever sent, so they are left out. CQI/RSRP/RSRQ are not supported.
+METRICS = ("DRB.UEThpDl,DRB.UEThpUl,DRB.RlcSduTransmittedVolumeDL,DRB.RlcSduTransmittedVolumeUL,"
+           "RRU.PrbUsedDl,RRU.PrbUsedUl,DRB.RlcDelayUl")
 FIELDS = ["rx_utc", "collet_start_utc", "e2_node", "report_style", "ue_id", "granul_ms", "metric", "value"]
 
 
