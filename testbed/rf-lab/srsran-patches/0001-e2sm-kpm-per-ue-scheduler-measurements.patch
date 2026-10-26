@@ -1,5 +1,5 @@
 diff --git a/lib/e2/e2sm/e2sm_kpm/e2sm_kpm_du_meas_provider_impl.cpp b/lib/e2/e2sm/e2sm_kpm/e2sm_kpm_du_meas_provider_impl.cpp
-index f97c889..564cd25 100644
+index f97c889..2cd7073 100644
 --- a/lib/e2/e2sm/e2sm_kpm/e2sm_kpm_du_meas_provider_impl.cpp
 +++ b/lib/e2/e2sm/e2sm_kpm/e2sm_kpm_du_meas_provider_impl.cpp
 @@ -106,6 +106,40 @@ e2sm_kpm_du_meas_provider_impl::e2sm_kpm_du_meas_provider_impl(srs_du::f1ap_ue_i
@@ -233,7 +233,7 @@ index f97c889..564cd25 100644
 +                                                 std::vector<asn1::e2sm::meas_record_item_c>& items)
 +{
 +  return get_ue_scheduler_value(
-+      ues, items, true, [](const scheduler_ue_metrics& m) -> std::optional<double> { return m.last_phr.has_value() ? std::optional<double>(*m.last_phr) : std::nullopt; });
++      ues, items, false, [](const scheduler_ue_metrics& m) -> std::optional<double> { return m.last_phr.has_value() ? std::optional<double>(*m.last_phr) : std::nullopt; });
 +}
 +
 +// SRSRAN.UeSrCount

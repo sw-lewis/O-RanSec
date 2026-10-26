@@ -18,7 +18,7 @@ They are UE-level only (report styles 2-5); a node-level request gets "no value"
 | `SRSRAN.UeUlCrcOk`, `SRSRAN.UeUlCrcNok` | UL CRC passes / failures in the period | integer |
 | `SRSRAN.UeDlBuffer` | DL buffer occupancy, bytes | integer |
 | `SRSRAN.UeUlBsr` | UL buffer status report, bytes | integer |
-| `SRSRAN.UePhr` | last power headroom report, dB (negative values report as 0) | integer |
+| `SRSRAN.UePhr` | last power headroom report, dB (−23 to +40) | real |
 | `SRSRAN.UeSrCount` | scheduling requests in the period | integer |
 
 A value the scheduler has not measured in the period (no CQI report, no PHR, no PUSCH) is sent as
