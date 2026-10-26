@@ -1,0 +1,23 @@
+# Edge UPF on sl04 (Open5GS 2.7). Controlled over N4 by the SMF in the testbed VM.
+logger:
+  level: info
+global:
+  max:
+    ue: 64
+upf:
+  pfcp:
+    server:
+      - address: 192.168.2.14     # N4: the SMF associates to this address
+  gtpu:
+    server:
+      - address: 127.0.20.1       # N3: local to sl04. The O-CU's N3 (192.168.2.14:2152) already holds
+                                  # port 2152 on the LAN address, so the UPF uses a loopback address.
+  session:
+    - subnet: 10.48.0.0/16
+      gateway: 10.48.0.1
+      dnn: mec
+      dev: ogsmec
+  metrics:
+    server:
+      - address: 127.0.0.1
+        port: 9091

@@ -1,0 +1,67 @@
+# sl04 MEC: edge UPF (DNN "mec") and the MEC server the UEs talk to, for benign and attack traffic.
+#   edge-upf   Open5GS UPF, host network, N4 on 192.168.2.14:8805, N3 on 127.0.20.1:2152, UEs 10.48.0.0/16
+#   mec-net    holds the server's single address 10.0.3.10 on bridge br-mec; the services share it
+#   httpd      web site :80 (benign browsing; HTTP flood, Slowloris, Torshammer target)
+#   sshd       SSH/SFTP :2222 (benign transfers; port-scan target)
+#   mosquitto  MQTT :1883 (benign IoT)
+#   mediamtx   video: RTSP :8554, RTMP :1935, SRT udp/8890, HLS :8888
+# Everything runs on CPUs 12-15 (E-cores) so a loaded server cannot starve the O-DU on 4-11.
+# Start: docker compose up -d --build && sudo ./host-setup.sh
+name: mec
+services:
+  edge-upf:
+    build: ./upf
+    image: sixg/edge-upf:2.7
+    network_mode: host
+    cap_add: [NET_ADMIN]
+    devices: [/dev/net/tun]
+    cpuset: "12-15"
+    mem_limit: 512m
+    volumes: [./upf/upf.yaml:/etc/open5gs/upf.yaml:ro]
+    restart: unless-stopped
+
+  mec-net:
+    image: alpine:3.20
+    command: sleep infinity
+    networks:
+      mec: {ipv4_address: 10.0.3.10}
+    cpuset: "12-15"
+    restart: unless-stopped
+
+  httpd:
+    image: httpd:2.4
+    network_mode: service:mec-net
+    volumes: [./www:/usr/local/apache2/htdocs:ro]
+    cpuset: "12-15"
+    mem_limit: 512m
+    restart: unless-stopped
+
+  sshd:
+    image: lscr.io/linuxserver/openssh-server:latest
+    network_mode: service:mec-net
+    environment: {PUID: "1000", PGID: "1000", USER_NAME: mec, USER_PASSWORD: mec-lab, PASSWORD_ACCESS: "true"}
+    cpuset: "12-15"
+    mem_limit: 256m
+    restart: unless-stopped
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0.20
+    network_mode: service:mec-net
+    command: mosquitto -c /mosquitto-no-auth.conf
+    cpuset: "12-15"
+    mem_limit: 128m
+    restart: unless-stopped
+
+  mediamtx:
+    image: bluenviron/mediamtx:1.21.1
+    network_mode: service:mec-net
+    cpuset: "12-15"
+    mem_limit: 512m
+    restart: unless-stopped
+
+networks:
+  mec:
+    driver: bridge
+    driver_opts: {com.docker.network.bridge.name: br-mec}
+    ipam:
+      config: [{subnet: 10.0.3.0/24, gateway: 10.0.3.1}]

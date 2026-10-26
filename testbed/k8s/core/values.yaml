@@ -3,6 +3,7 @@
 #   eMBB  SST 1 SD 000001  dnn embb   10.45.0.0/16  UPF core-upf  (from this chart)
 #   URLLC SST 2 SD 000002  dnn urllc  10.46.0.0/16  UPF upf-urllc (upf-urllc.yaml)
 #   mMTC  SST 3 SD 000003  dnn mmtc   10.47.0.0/16  UPF upf-mmtc  (upf-mmtc.yaml)
+# MEC breakout on the eMBB slice (RF lab): dnn mec  10.48.0.0/16  edge UPF on sl04 (rf-lab/mec), no NAT
 
 # Subscribers. Key/OPC are the well-known UERANSIM test values (a deliberate weakness).
 # The chart joins these with "&&"; "|| true" lets re-runs skip IMSIs that already exist (unique index).
@@ -17,6 +18,8 @@ populate:
     - open5gs-dbctl add_ue_with_slice 999700000000301 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA embb 1 000001 || true
     # srsUE on sl04 (RF lab, O-CU/O-DU)
     - open5gs-dbctl add_ue_with_slice 999700000000401 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA embb 1 000001 || true
+    # srsUE on sl04 using the MEC (DNN mec -> edge UPF on sl04)
+    - open5gs-dbctl add_ue_with_slice 999700000000404 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA mec 1 000001 || true
     # URLLC: drone link and a control device
     - open5gs-dbctl add_ue_with_slice 999700000000101 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA urllc 2 000002 || true
     - open5gs-dbctl add_ue_with_slice 999700000000102 465B5CE8B199B49FAA5F0A2EE238A6BC E8ED289DEBA952E4283B54E88E6183CA urllc 2 000002 || true
@@ -120,6 +123,7 @@ smf:
             - {address: core-upf-pfcp, dnn: [embb]}
             - {address: upf-urllc-pfcp, dnn: [urllc]}
             - {address: upf-mmtc-pfcp, dnn: [mmtc]}
+            - {address: 192.168.2.14, dnn: [mec]}   # edge UPF on sl04 (RF lab MEC)
       gtpc:
         server: [{dev: eth0}]
       gtpu:
@@ -130,10 +134,11 @@ smf:
         - {subnet: 10.45.0.0/16, gateway: 10.45.0.1, dnn: embb}
         - {subnet: 10.46.0.0/16, gateway: 10.46.0.1, dnn: urllc}
         - {subnet: 10.47.0.0/16, gateway: 10.47.0.1, dnn: mmtc}
+        - {subnet: 10.48.0.0/16, gateway: 10.48.0.1, dnn: mec}
       dns: [8.8.8.8, 8.8.4.4]
       mtu: 1400
       info:
         - s_nssai:
-            - {sst: 1, sd: "000001", dnn: [embb]}
+            - {sst: 1, sd: "000001", dnn: [embb, mec]}
             - {sst: 2, sd: "000002", dnn: [urllc]}
             - {sst: 3, sd: "000003", dnn: [mmtc]}
