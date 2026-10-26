@@ -1,0 +1,294 @@
+diff --git a/lib/e2/e2sm/e2sm_kpm/e2sm_kpm_du_meas_provider_impl.cpp b/lib/e2/e2sm/e2sm_kpm/e2sm_kpm_du_meas_provider_impl.cpp
+index f97c889..564cd25 100644
+--- a/lib/e2/e2sm/e2sm_kpm/e2sm_kpm_du_meas_provider_impl.cpp
++++ b/lib/e2/e2sm/e2sm_kpm/e2sm_kpm_du_meas_provider_impl.cpp
+@@ -106,6 +106,40 @@ e2sm_kpm_du_meas_provider_impl::e2sm_kpm_du_meas_provider_impl(srs_du::f1ap_ue_i
+                             e2sm_kpm_supported_metric_t{
+                                 NO_LABEL, E2_NODE_LEVEL, true, &e2sm_kpm_du_meas_provider_impl::get_prach_cell_count});
+ 
++  // Per-UE scheduler measurements (srsRAN extension, not in 3GPP TS 28.552 or the O-RAN KPM list).
++  supported_metrics.emplace(
++      "SRSRAN.UeCqi", e2sm_kpm_supported_metric_t{NO_LABEL, UE_LEVEL, false, &e2sm_kpm_du_meas_provider_impl::get_ue_cqi});
++  supported_metrics.emplace(
++      "SRSRAN.UeDlMcs", e2sm_kpm_supported_metric_t{NO_LABEL, UE_LEVEL, false, &e2sm_kpm_du_meas_provider_impl::get_ue_dl_mcs});
++  supported_metrics.emplace(
++      "SRSRAN.UeUlMcs", e2sm_kpm_supported_metric_t{NO_LABEL, UE_LEVEL, false, &e2sm_kpm_du_meas_provider_impl::get_ue_ul_mcs});
++  supported_metrics.emplace(
++      "SRSRAN.UeDlRi", e2sm_kpm_supported_metric_t{NO_LABEL, UE_LEVEL, false, &e2sm_kpm_du_meas_provider_impl::get_ue_dl_ri});
++  supported_metrics.emplace(
++      "SRSRAN.UeUlRi", e2sm_kpm_supported_metric_t{NO_LABEL, UE_LEVEL, false, &e2sm_kpm_du_meas_provider_impl::get_ue_ul_ri});
++  supported_metrics.emplace(
++      "SRSRAN.UePuschSnr", e2sm_kpm_supported_metric_t{NO_LABEL, UE_LEVEL, false, &e2sm_kpm_du_meas_provider_impl::get_ue_pusch_snr});
++  supported_metrics.emplace(
++      "SRSRAN.UePucchSnr", e2sm_kpm_supported_metric_t{NO_LABEL, UE_LEVEL, false, &e2sm_kpm_du_meas_provider_impl::get_ue_pucch_snr});
++  supported_metrics.emplace(
++      "SRSRAN.UePuschRsrp", e2sm_kpm_supported_metric_t{NO_LABEL, UE_LEVEL, false, &e2sm_kpm_du_meas_provider_impl::get_ue_pusch_rsrp});
++  supported_metrics.emplace(
++      "SRSRAN.UeDlHarqOk", e2sm_kpm_supported_metric_t{NO_LABEL, UE_LEVEL, false, &e2sm_kpm_du_meas_provider_impl::get_ue_dl_harq_ok});
++  supported_metrics.emplace(
++      "SRSRAN.UeDlHarqNok", e2sm_kpm_supported_metric_t{NO_LABEL, UE_LEVEL, false, &e2sm_kpm_du_meas_provider_impl::get_ue_dl_harq_nok});
++  supported_metrics.emplace(
++      "SRSRAN.UeUlCrcOk", e2sm_kpm_supported_metric_t{NO_LABEL, UE_LEVEL, false, &e2sm_kpm_du_meas_provider_impl::get_ue_ul_crc_ok});
++  supported_metrics.emplace(
++      "SRSRAN.UeUlCrcNok", e2sm_kpm_supported_metric_t{NO_LABEL, UE_LEVEL, false, &e2sm_kpm_du_meas_provider_impl::get_ue_ul_crc_nok});
++  supported_metrics.emplace(
++      "SRSRAN.UeDlBuffer", e2sm_kpm_supported_metric_t{NO_LABEL, UE_LEVEL, false, &e2sm_kpm_du_meas_provider_impl::get_ue_dl_buffer});
++  supported_metrics.emplace(
++      "SRSRAN.UeUlBsr", e2sm_kpm_supported_metric_t{NO_LABEL, UE_LEVEL, false, &e2sm_kpm_du_meas_provider_impl::get_ue_ul_bsr});
++  supported_metrics.emplace(
++      "SRSRAN.UePhr", e2sm_kpm_supported_metric_t{NO_LABEL, UE_LEVEL, false, &e2sm_kpm_du_meas_provider_impl::get_ue_phr});
++  supported_metrics.emplace(
++      "SRSRAN.UeSrCount", e2sm_kpm_supported_metric_t{NO_LABEL, UE_LEVEL, false, &e2sm_kpm_du_meas_provider_impl::get_ue_sr_count});
++
+   // Check if the supported metrics are matching e2sm_kpm metrics definitions.
+   check_e2sm_kpm_metrics_definitions(get_e2sm_kpm_28_552_metrics());
+   check_e2sm_kpm_metrics_definitions(get_e2sm_kpm_oran_metrics());
+@@ -1205,3 +1239,201 @@ bool e2sm_kpm_du_meas_provider_impl::get_drb_ul_rlc_sdu_latency(const asn1::e2sm
+   }
+   return meas_collected;
+ }
++
++// ---- Per-UE scheduler measurements (srsRAN extension) ----
++
++bool e2sm_kpm_du_meas_provider_impl::get_ue_scheduler_value(const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                                                            std::vector<asn1::e2sm::meas_record_item_c>& items,
++                                                            bool                                         as_integer,
++                                                            ue_value_func_t                              value)
++{
++  // Node-level request (no UE list): these measurements exist per UE only.
++  if (ues.empty()) {
++    meas_record_item_c meas_record_item;
++    meas_record_item.set_no_value();
++    items.push_back(meas_record_item);
++    return true;
++  }
++  for (const auto& ue : ues) {
++    meas_record_item_c  meas_record_item;
++    gnb_cu_ue_f1ap_id_t gnb_cu_ue_f1ap_id = int_to_gnb_cu_ue_f1ap_id(ue.gnb_du_ue_id().gnb_cu_ue_f1ap_id);
++    du_ue_index_t       ue_idx            = f1ap_ue_id_provider.get_ue_index(gnb_cu_ue_f1ap_id);
++    auto                it = std::find_if(last_ue_metrics.begin(), last_ue_metrics.end(), [ue_idx](const scheduler_ue_metrics& m) {
++      return m.ue_index == ue_idx;
++    });
++    std::optional<double> v;
++    if (ue_idx != du_ue_index_t::INVALID_DU_UE_INDEX and it != last_ue_metrics.end()) {
++      v = value(*it);
++    }
++    if (not v.has_value()) {
++      meas_record_item.set_no_value();
++    } else if (as_integer) {
++      meas_record_item.set_integer() = static_cast<uint64_t>(std::max(0.0, std::round(*v)));
++    } else {
++      meas_record_item.set_real();
++      meas_record_item.real().value = *v;
++    }
++    items.push_back(meas_record_item);
++  }
++  return true;
++}
++
++// SRSRAN.UeCqi
++bool e2sm_kpm_du_meas_provider_impl::get_ue_cqi(const asn1::e2sm::label_info_list_l          label_info_list,
++                                                 const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                                                 const std::optional<asn1::e2sm::cgi_c>       cell_global_id,
++                                                 std::vector<asn1::e2sm::meas_record_item_c>& items)
++{
++  return get_ue_scheduler_value(
++      ues, items, true, [](const scheduler_ue_metrics& m) -> std::optional<double> { return m.cqi_stats.get_nof_observations() > 0 ? std::optional<double>(std::round(m.cqi_stats.get_mean())) : std::nullopt; });
++}
++
++// SRSRAN.UeDlMcs
++bool e2sm_kpm_du_meas_provider_impl::get_ue_dl_mcs(const asn1::e2sm::label_info_list_l          label_info_list,
++                                                 const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                                                 const std::optional<asn1::e2sm::cgi_c>       cell_global_id,
++                                                 std::vector<asn1::e2sm::meas_record_item_c>& items)
++{
++  return get_ue_scheduler_value(
++      ues, items, true, [](const scheduler_ue_metrics& m) -> std::optional<double> { return std::optional<double>(m.dl_mcs.to_uint()); });
++}
++
++// SRSRAN.UeUlMcs
++bool e2sm_kpm_du_meas_provider_impl::get_ue_ul_mcs(const asn1::e2sm::label_info_list_l          label_info_list,
++                                                 const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                                                 const std::optional<asn1::e2sm::cgi_c>       cell_global_id,
++                                                 std::vector<asn1::e2sm::meas_record_item_c>& items)
++{
++  return get_ue_scheduler_value(
++      ues, items, true, [](const scheduler_ue_metrics& m) -> std::optional<double> { return std::optional<double>(m.ul_mcs.to_uint()); });
++}
++
++// SRSRAN.UeDlRi
++bool e2sm_kpm_du_meas_provider_impl::get_ue_dl_ri(const asn1::e2sm::label_info_list_l          label_info_list,
++                                                 const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                                                 const std::optional<asn1::e2sm::cgi_c>       cell_global_id,
++                                                 std::vector<asn1::e2sm::meas_record_item_c>& items)
++{
++  return get_ue_scheduler_value(
++      ues, items, false, [](const scheduler_ue_metrics& m) -> std::optional<double> { return m.dl_ri_stats.get_nof_observations() > 0 ? std::optional<double>(m.dl_ri_stats.get_mean()) : std::nullopt; });
++}
++
++// SRSRAN.UeUlRi
++bool e2sm_kpm_du_meas_provider_impl::get_ue_ul_ri(const asn1::e2sm::label_info_list_l          label_info_list,
++                                                 const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                                                 const std::optional<asn1::e2sm::cgi_c>       cell_global_id,
++                                                 std::vector<asn1::e2sm::meas_record_item_c>& items)
++{
++  return get_ue_scheduler_value(
++      ues, items, false, [](const scheduler_ue_metrics& m) -> std::optional<double> { return m.ul_ri_stats.get_nof_observations() > 0 ? std::optional<double>(m.ul_ri_stats.get_mean()) : std::nullopt; });
++}
++
++// SRSRAN.UePuschSnr
++bool e2sm_kpm_du_meas_provider_impl::get_ue_pusch_snr(const asn1::e2sm::label_info_list_l          label_info_list,
++                                                 const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                                                 const std::optional<asn1::e2sm::cgi_c>       cell_global_id,
++                                                 std::vector<asn1::e2sm::meas_record_item_c>& items)
++{
++  return get_ue_scheduler_value(
++      ues, items, false, [](const scheduler_ue_metrics& m) -> std::optional<double> { return std::isfinite(m.pusch_snr_db) ? std::optional<double>(m.pusch_snr_db) : std::nullopt; });
++}
++
++// SRSRAN.UePucchSnr
++bool e2sm_kpm_du_meas_provider_impl::get_ue_pucch_snr(const asn1::e2sm::label_info_list_l          label_info_list,
++                                                 const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                                                 const std::optional<asn1::e2sm::cgi_c>       cell_global_id,
++                                                 std::vector<asn1::e2sm::meas_record_item_c>& items)
++{
++  return get_ue_scheduler_value(
++      ues, items, false, [](const scheduler_ue_metrics& m) -> std::optional<double> { return std::isfinite(m.pucch_snr_db) ? std::optional<double>(m.pucch_snr_db) : std::nullopt; });
++}
++
++// SRSRAN.UePuschRsrp
++bool e2sm_kpm_du_meas_provider_impl::get_ue_pusch_rsrp(const asn1::e2sm::label_info_list_l          label_info_list,
++                                                 const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                                                 const std::optional<asn1::e2sm::cgi_c>       cell_global_id,
++                                                 std::vector<asn1::e2sm::meas_record_item_c>& items)
++{
++  return get_ue_scheduler_value(
++      ues, items, false, [](const scheduler_ue_metrics& m) -> std::optional<double> { return std::isfinite(m.pusch_rsrp_db) ? std::optional<double>(m.pusch_rsrp_db) : std::nullopt; });
++}
++
++// SRSRAN.UeDlHarqOk
++bool e2sm_kpm_du_meas_provider_impl::get_ue_dl_harq_ok(const asn1::e2sm::label_info_list_l          label_info_list,
++                                                 const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                                                 const std::optional<asn1::e2sm::cgi_c>       cell_global_id,
++                                                 std::vector<asn1::e2sm::meas_record_item_c>& items)
++{
++  return get_ue_scheduler_value(
++      ues, items, true, [](const scheduler_ue_metrics& m) -> std::optional<double> { return std::optional<double>(m.dl_nof_ok); });
++}
++
++// SRSRAN.UeDlHarqNok
++bool e2sm_kpm_du_meas_provider_impl::get_ue_dl_harq_nok(const asn1::e2sm::label_info_list_l          label_info_list,
++                                                 const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                                                 const std::optional<asn1::e2sm::cgi_c>       cell_global_id,
++                                                 std::vector<asn1::e2sm::meas_record_item_c>& items)
++{
++  return get_ue_scheduler_value(
++      ues, items, true, [](const scheduler_ue_metrics& m) -> std::optional<double> { return std::optional<double>(m.dl_nof_nok); });
++}
++
++// SRSRAN.UeUlCrcOk
++bool e2sm_kpm_du_meas_provider_impl::get_ue_ul_crc_ok(const asn1::e2sm::label_info_list_l          label_info_list,
++                                                 const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                                                 const std::optional<asn1::e2sm::cgi_c>       cell_global_id,
++                                                 std::vector<asn1::e2sm::meas_record_item_c>& items)
++{
++  return get_ue_scheduler_value(
++      ues, items, true, [](const scheduler_ue_metrics& m) -> std::optional<double> { return std::optional<double>(m.ul_nof_ok); });
++}
++
++// SRSRAN.UeUlCrcNok
++bool e2sm_kpm_du_meas_provider_impl::get_ue_ul_crc_nok(const asn1::e2sm::label_info_list_l          label_info_list,
++                                                 const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                                                 const std::optional<asn1::e2sm::cgi_c>       cell_global_id,
++                                                 std::vector<asn1::e2sm::meas_record_item_c>& items)
++{
++  return get_ue_scheduler_value(
++      ues, items, true, [](const scheduler_ue_metrics& m) -> std::optional<double> { return std::optional<double>(m.ul_nof_nok); });
++}
++
++// SRSRAN.UeDlBuffer
++bool e2sm_kpm_du_meas_provider_impl::get_ue_dl_buffer(const asn1::e2sm::label_info_list_l          label_info_list,
++                                                 const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                                                 const std::optional<asn1::e2sm::cgi_c>       cell_global_id,
++                                                 std::vector<asn1::e2sm::meas_record_item_c>& items)
++{
++  return get_ue_scheduler_value(
++      ues, items, true, [](const scheduler_ue_metrics& m) -> std::optional<double> { return std::optional<double>(m.dl_bs); });
++}
++
++// SRSRAN.UeUlBsr
++bool e2sm_kpm_du_meas_provider_impl::get_ue_ul_bsr(const asn1::e2sm::label_info_list_l          label_info_list,
++                                                 const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                                                 const std::optional<asn1::e2sm::cgi_c>       cell_global_id,
++                                                 std::vector<asn1::e2sm::meas_record_item_c>& items)
++{
++  return get_ue_scheduler_value(
++      ues, items, true, [](const scheduler_ue_metrics& m) -> std::optional<double> { return std::optional<double>(m.bsr); });
++}
++
++// SRSRAN.UePhr
++bool e2sm_kpm_du_meas_provider_impl::get_ue_phr(const asn1::e2sm::label_info_list_l          label_info_list,
++                                                 const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                                                 const std::optional<asn1::e2sm::cgi_c>       cell_global_id,
++                                                 std::vector<asn1::e2sm::meas_record_item_c>& items)
++{
++  return get_ue_scheduler_value(
++      ues, items, true, [](const scheduler_ue_metrics& m) -> std::optional<double> { return m.last_phr.has_value() ? std::optional<double>(*m.last_phr) : std::nullopt; });
++}
++
++// SRSRAN.UeSrCount
++bool e2sm_kpm_du_meas_provider_impl::get_ue_sr_count(const asn1::e2sm::label_info_list_l          label_info_list,
++                                                 const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                                                 const std::optional<asn1::e2sm::cgi_c>       cell_global_id,
++                                                 std::vector<asn1::e2sm::meas_record_item_c>& items)
++{
++  return get_ue_scheduler_value(
++      ues, items, true, [](const scheduler_ue_metrics& m) -> std::optional<double> { return std::optional<double>(m.sr_count); });
++}
+diff --git a/lib/e2/e2sm/e2sm_kpm/e2sm_kpm_du_meas_provider_impl.h b/lib/e2/e2sm/e2sm_kpm/e2sm_kpm_du_meas_provider_impl.h
+index 999d7d1..59435af 100644
+--- a/lib/e2/e2sm/e2sm_kpm/e2sm_kpm_du_meas_provider_impl.h
++++ b/lib/e2/e2sm/e2sm_kpm/e2sm_kpm_du_meas_provider_impl.h
+@@ -30,9 +30,12 @@
+ #include "srsran/e2/e2sm/e2sm.h"
+ #include "srsran/e2/e2sm/e2sm_kpm.h"
+ #include "srsran/f1ap/du/f1ap_du.h"
++#include <algorithm>
++#include <cmath>
+ #include <deque>
+ #include <map>
+ #include <numeric>
++#include <optional>
+ 
+ namespace srsran {
+ 
+@@ -122,6 +125,29 @@ private:
+   metric_meas_getter_func_t get_drb_ul_rlc_sdu_latency;
+   metric_meas_getter_func_t get_prach_cell_count;
+ 
++  // Per-UE scheduler measurements exported over E2SM-KPM (non-standard names, prefix "SRSRAN.").
++  using ue_value_func_t = std::optional<double> (*)(const scheduler_ue_metrics&);
++  bool get_ue_scheduler_value(const std::vector<asn1::e2sm::ue_id_c>&      ues,
++                              std::vector<asn1::e2sm::meas_record_item_c>& items,
++                              bool                                         as_integer,
++                              ue_value_func_t                              value);
++  metric_meas_getter_func_t get_ue_cqi;
++  metric_meas_getter_func_t get_ue_dl_mcs;
++  metric_meas_getter_func_t get_ue_ul_mcs;
++  metric_meas_getter_func_t get_ue_dl_ri;
++  metric_meas_getter_func_t get_ue_ul_ri;
++  metric_meas_getter_func_t get_ue_pusch_snr;
++  metric_meas_getter_func_t get_ue_pucch_snr;
++  metric_meas_getter_func_t get_ue_pusch_rsrp;
++  metric_meas_getter_func_t get_ue_dl_harq_ok;
++  metric_meas_getter_func_t get_ue_dl_harq_nok;
++  metric_meas_getter_func_t get_ue_ul_crc_ok;
++  metric_meas_getter_func_t get_ue_ul_crc_nok;
++  metric_meas_getter_func_t get_ue_dl_buffer;
++  metric_meas_getter_func_t get_ue_ul_bsr;
++  metric_meas_getter_func_t get_ue_phr;
++  metric_meas_getter_func_t get_ue_sr_count;
++
+   srslog::basic_logger&                              logger;
+   srs_du::f1ap_ue_id_translator&                     f1ap_ue_id_provider;
+   unsigned                                           nof_cell_prbs;

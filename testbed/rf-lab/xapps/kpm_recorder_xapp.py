@@ -51,6 +51,14 @@ METRICS = ",".join([
     "DRB.RlcSduDelayDl", "DRB.RlcDelayUl", "DRB.AirIfDelayUl",
     "DRB.RlcPacketDropRateDl",
 ])
+# Per-UE scheduler measurements added by rf-lab/srsran-patches/0001 (non-standard names, "SRSRAN." prefix).
+# Only an O-DU built with that patch reports them; request them with --srsran_ext.
+SRSRAN_EXT = ",".join([
+    "SRSRAN.UeCqi", "SRSRAN.UeDlMcs", "SRSRAN.UeUlMcs", "SRSRAN.UeDlRi", "SRSRAN.UeUlRi",
+    "SRSRAN.UePuschSnr", "SRSRAN.UePucchSnr", "SRSRAN.UePuschRsrp",
+    "SRSRAN.UeDlHarqOk", "SRSRAN.UeDlHarqNok", "SRSRAN.UeUlCrcOk", "SRSRAN.UeUlCrcNok",
+    "SRSRAN.UeDlBuffer", "SRSRAN.UeUlBsr", "SRSRAN.UePhr", "SRSRAN.UeSrCount",
+])
 FIELDS = ["rx_utc", "collet_start_utc", "e2_node", "report_style", "ue_id", "granul_ms", "metric", "value"]
 
 
@@ -139,7 +147,11 @@ if __name__ == "__main__":
     p.add_argument("--http_server_port", type=int, default=8092)
     p.add_argument("--rmr_port", type=int, default=4562)
     p.add_argument("--quiet", action="store_true", help="do not print one line per indication")
+    p.add_argument("--srsran_ext", action="store_true",
+                   help="also request the SRSRAN.* per-UE scheduler measurements (patched O-DU only)")
     a = p.parse_args()
+    if a.srsran_ext:
+        a.metrics = ",".join([a.metrics, SRSRAN_EXT])
 
     nodes = [n for n in a.e2_node_id.split(",") if n] or connected_dus(a.e2mgr_url)
     if not nodes:
