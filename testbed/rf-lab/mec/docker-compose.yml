@@ -62,6 +62,11 @@ services:
 networks:
   mec:
     driver: bridge
-    driver_opts: {com.docker.network.bridge.name: br-mec}
+    driver_opts:
+      com.docker.network.bridge.name: br-mec
+      # Routed, not NATed (Docker 27+): UE traffic from the edge UPF (10.48.0.0/16) is routed straight
+      # to the server. Without this, Docker 28 drops any packet to a container that does not arrive on
+      # its own bridge (raw PREROUTING "-d 10.0.3.10 ! -i br-mec -j DROP").
+      com.docker.network.bridge.gateway_mode_ipv4: routed
     ipam:
       config: [{subnet: 10.0.3.0/24, gateway: 10.0.3.1}]

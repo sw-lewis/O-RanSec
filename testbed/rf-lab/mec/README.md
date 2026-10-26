@@ -56,6 +56,21 @@ and the internet, so attacks cannot touch the RIC, the O-DU or anything else.
    docker compose logs httpd | tail -2           # requests from 10.48.0.x
    ```
 
+## Notes from bring-up
+
+- Docker 27 or later is needed: the server network is created in `routed` gateway mode, otherwise Docker
+  drops routed traffic to containers (`iptables -t raw -S PREROUTING` shows a DROP for 10.0.3.10).
+- N4 must not be NATed. Add, on the VM and on Pop!_OS (until `./6g start` does it):
+  ```bash
+  ./6g ssh "sudo iptables -t nat -I POSTROUTING 1 -s 10.42.0.0/16 -d 192.168.2.14 -j RETURN"
+  sudo iptables -t nat -I POSTROUTING 1 -s 10.166.0.0/24 -d 192.168.2.14 -j RETURN
+  sudo iptables -t nat -I POSTROUTING 1 -s 10.42.0.0/16 -d 192.168.2.14 -j RETURN
+  ```
+  With NAT, the edge UPF sees the SMF at two addresses and PFCP replies are lost: the session is set up,
+  the Session Modification times out and the UE gets an RRC Release after about 8 s.
+- After restarting the SMF, restart the AMF too (`rollout restart deploy/core-amf`) and re-attach the RAN:
+  otherwise the AMF keeps stale session contexts and releases the UE (`Cause[Group:1 Cause:14]`).
+
 ## Capturing MEC traffic
 
 N3 for `mec` sessions stays on sl04's loopback: `sudo tcpdump -ni lo udp port 2152`.
