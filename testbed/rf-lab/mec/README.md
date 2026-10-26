@@ -60,7 +60,7 @@ and the internet, so attacks cannot touch the RIC, the O-DU or anything else.
 
 - Docker 27 or later is needed: the server network is created in `routed` gateway mode, otherwise Docker
   drops routed traffic to containers (`iptables -t raw -S PREROUTING` shows a DROP for 10.0.3.10).
-- N4 must not be NATed. Add, on the VM and on Pop!_OS (until `./6g start` does it):
+- N4 must not be NATed. `./6g start` adds these rules (`ranlink_up`); to add them by hand:
   ```bash
   ./6g ssh "sudo iptables -t nat -I POSTROUTING 1 -s 10.42.0.0/16 -d 192.168.2.14 -j RETURN"
   sudo iptables -t nat -I POSTROUTING 1 -s 10.166.0.0/24 -d 192.168.2.14 -j RETURN
@@ -70,6 +70,8 @@ and the internet, so attacks cannot touch the RIC, the O-DU or anything else.
   the Session Modification times out and the UE gets an RRC Release after about 8 s.
 - After restarting the SMF, restart the AMF too (`rollout restart deploy/core-amf`) and re-attach the RAN:
   otherwise the AMF keeps stale session contexts and releases the UE (`Cause[Group:1 Cause:14]`).
+- After restarting the edge UPF (including `docker compose down`/`up`), re-attach the UEs: restart the
+  O-DU and srsUE. The SMF re-installs the sessions on the UPF, but they no longer match the O-CU's tunnels.
 
 ## Capturing MEC traffic
 

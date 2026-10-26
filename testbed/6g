@@ -88,16 +88,27 @@ relay_down() {
 }
 
 RAN_NODE=192.168.2.14   # sl04: O-CU/O-DU for the RF lab
-ranlink_up() {  # let sl04's N2/N3 traffic reach the VM's pods, and replies get back
+ranlink_up() {  # let sl04's N2/N3/N4 traffic reach the VM's pods, and replies get back
   sudo ip route replace 10.42.0.0/16 via "$VM_IP"
   sudo ip route replace 10.43.0.0/16 via "$VM_IP"
   sudo iptables -C FORWARD -s "$RAN_NODE" -o virbr-6g -j ACCEPT 2>/dev/null || sudo iptables -I FORWARD 1 -s "$RAN_NODE" -o virbr-6g -j ACCEPT
   sudo iptables -C FORWARD -i virbr-6g -d "$RAN_NODE" -j ACCEPT 2>/dev/null || sudo iptables -I FORWARD 1 -i virbr-6g -d "$RAN_NODE" -j ACCEPT
+  # No NAT between the VM's pods and sl04: PFCP (N4) to the edge UPF on sl04 fails when the UPF sees the
+  # SMF at a pod address and a NATed address. sl04 routes 10.42.0.0/16 and 10.166.0.0/24 back via this host.
+  local r
+  for r in "-s 10.166.0.0/24 -d $RAN_NODE -j RETURN" "-s 10.42.0.0/16 -d $RAN_NODE -j RETURN"; do
+    sudo iptables -t nat -C POSTROUTING $r 2>/dev/null || sudo iptables -t nat -I POSTROUTING 1 $r
+  done
+  ssh "${SSH_OPTS[@]}" -o BatchMode=yes "sixg@$VM_IP" \
+    "sudo iptables -t nat -C POSTROUTING -s 10.42.0.0/16 -d $RAN_NODE -j RETURN 2>/dev/null || sudo iptables -t nat -I POSTROUTING 1 -s 10.42.0.0/16 -d $RAN_NODE -j RETURN" \
+    || say "Warning: could not add the no-NAT rule for $RAN_NODE inside the VM"
   say "RAN link to $RAN_NODE up"
 }
 ranlink_down() {
   sudo iptables -D FORWARD -s "$RAN_NODE" -o virbr-6g -j ACCEPT 2>/dev/null || true
   sudo iptables -D FORWARD -i virbr-6g -d "$RAN_NODE" -j ACCEPT 2>/dev/null || true
+  sudo iptables -t nat -D POSTROUTING -s 10.166.0.0/24 -d "$RAN_NODE" -j RETURN 2>/dev/null || true
+  sudo iptables -t nat -D POSTROUTING -s 10.42.0.0/16 -d "$RAN_NODE" -j RETURN 2>/dev/null || true
   sudo ip route del 10.42.0.0/16 2>/dev/null || true
   sudo ip route del 10.43.0.0/16 2>/dev/null || true
 }
