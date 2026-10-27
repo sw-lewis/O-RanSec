@@ -1,0 +1,11 @@
+[Unit]
+Description=Default route via the srsUE tunnel in netns ue1
+After=network.target
+
+[Service]
+ExecStart=/usr/local/sbin/ue-route-keeper.sh ue1 tun_srsue
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
